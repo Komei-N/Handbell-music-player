@@ -1,422 +1,313 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Handbell MusicXML Player (GitHub Pages)</title>
-  <style>
-    :root{--accent:#4b7bec;--bg:#f7f9fc}
-    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN",meiryo,sans-serif;background:var(--bg);color:#111}
-    header{padding:12px 18px;background:white;box-shadow:0 2px 6px rgba(10,10,10,0.04);display:flex;gap:12px;align-items:center}
-    h1{font-size:18px;margin:0}
-    main{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
-    .panel{background:white;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(10,10,10,0.03)}
-    #controls{display:flex;flex-direction:column;gap:12px}
-    label{font-size:13px}
-    select,input[type=range]{width:100%}
-    .btns{display:flex;gap:8px}
-    button{padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:white;cursor:pointer}
-    button.secondary{background:#6c757d}
-    #scoreContainer{padding:12px}
-    #score{min-height:520px;background:white;border-radius:8px;padding:8px}
-    .small{font-size:12px;color:#444}
-    .part-list{max-height:140px;overflow:auto;border:1px solid #eee;padding:6px;border-radius:6px}
-    .note-filter{display:flex;flex-wrap:wrap;gap:6px}
-    .note-filter input{margin-right:6px}
-    footer{padding:12px;text-align:center;font-size:12px;color:#666}
-    .warning{color:#b24343;font-weight:600}
-    .controls-row{display:flex;gap:8px;align-items:center}
-    @media(max-width:900px){main{grid-template-columns:1fr;}}
-  </style>
-  <!-- Libraries (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.9/build/opensheetmusicdisplay.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.min.js"></script>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Handbell MusicXML Player (Timewise対応版)</title>
+<style>
+:root{--accent:#4b7bec;--bg:#f7f9fc}
+html,body{height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN",meiryo,sans-serif;background:var(--bg);color:#111}
+header{padding:12px 18px;background:white;box-shadow:0 2px 6px rgba(10,10,10,0.04);display:flex;gap:12px;align-items:center}
+h1{font-size:18px;margin:0}
+main{display:grid;grid-template-columns:360px 1fr;gap:12px;padding:12px}
+.panel{background:white;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(10,10,10,0.03)}
+#controls{display:flex;flex-direction:column;gap:12px}
+label{font-size:13px}
+select,input[type=range]{width:100%}
+.btns{display:flex;gap:8px}
+button{padding:8px 12px;border-radius:8px;border:0;background:var(--accent);color:white;cursor:pointer}
+button.secondary{background:#6c757d}
+#scoreContainer{padding:12px}
+#score{min-height:520px;background:white;border-radius:8px;padding:8px}
+.small{font-size:12px;color:#444}
+.part-list{max-height:140px;overflow:auto;border:1px solid #eee;padding:6px;border-radius:6px}
+.note-filter{display:flex;flex-wrap:wrap;gap:6px}
+.note-filter input{margin-right:6px}
+footer{padding:12px;text-align:center;font-size:12px;color:#666}
+.warning{color:#b24343;font-weight:600}
+.controls-row{display:flex;gap:8px;align-items:center}
+@media(max-width:900px){main{grid-template-columns:1fr;}}
+</style>
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@1.8.9/build/opensheetmusicdisplay.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.8.39/build/Tone.min.js"></script>
 </head>
 <body>
-  <header>
-    <h1>Handbell MusicXML Player</h1>
-    <div class="small">MusicXML/MXL を読み込み、ハンドベル音で再生します。カーソルはOSMDのイテレータを使って正確に同期します。</div>
-  </header>
-
-  <main>
-    <div class="panel" id="left">
-      <div id="controls">
-        <div>
-          <label>曲を選択</label>
-          <select id="songSelector"></select>
-          <div class="small">/music フォルダに song1.mxl (または .xml) を配置してください</div>
-        </div>
-
-        <div>
-          <label>パート選択（複数可）</label>
-          <div class="part-list" id="partList">読み込み後に表示されます</div>
-        </div>
-
-        <div>
-          <label>演奏音程フィルター（複数選択）</label>
-          <div class="note-filter" id="noteFilter">読み込み後に表示されます</div>
-          <div class="small">チェックした音だけ鳴らします（デフォルトはすべて選択）。</div>
-        </div>
-
-        <div>
-          <label>リズム変更（%） — 演奏速度 (100 = 原曲)</label>
-          <input type="range" id="tempoPercent" min="20" max="300" value="100">
-          <div class="small">現在: <span id="tempoPercentLabel">100%</span></div>
-        </div>
-
-        <div class="controls-row">
-          <label>音源</label>
-          <select id="soundMode">
-            <option value="samples">サンプル（/soundfonts/*.mp3）</option>
-            <option value="synth">内蔵シンセ（サンプルなしでも可）</option>
-          </select>
-        </div>
-
-        <div class="btns">
-          <button id="playBtn">▶ 再生</button>
-          <button id="pauseBtn" class="secondary">⏸ 一時停止</button>
-          <button id="stopBtn" class="secondary">■ 停止</button>
-        </div>
-
-        <div>
-          <label>進行表示</label>
-          <div class="small">カーソルはOSMDの Iterator を走査してタイムスタンプを求め、正確に現在の縦位置を指します。テンポ変化にも対応。</div>
-        </div>
-
-        <div class="warning" id="warningArea" style="display:none"></div>
-      </div>
-    </div>
-
-    <div class="panel" id="right">
-      <div id="scoreContainer">
-        <div id="score"></div>
-      </div>
-    </div>
-  </main>
-
-  <footer>
-    必要ファイル（例）:
-    <code>/music/song1.mxl</code>, <code>/music/song2.mxl</code>, <code>/music/song3.mxl</code>
-    とサンプル音源 <code>/soundfonts/handbell_C4.mp3</code> のようなファイルを置いてください。<br>
-    ※ サンプルが無い場合は「内蔵シンセ」を選ぶと動作確認できます。
-  </footer>
+<header>
+<h1>Handbell MusicXML Player</h1>
+<div class="small">MusicXML/MXL を読み込み、ハンドベル音で再生します。カーソルはOSMDのイテレータを使って正確に同期します。</div>
+</header>
+<main>
+<div class="panel" id="left">
+<div id="controls">
+<div>
+<label>曲を選択</label>
+<select id="songSelector"></select>
+<div class="small">/music フォルダに song1.mxl (または .xml) を配置してください</div>
+</div>
+<div>
+<label>パート選択（複数可）</label>
+<div class="part-list" id="partList">読み込み後に表示されます</div>
+</div>
+<div>
+<label>演奏音程フィルター（複数選択）</label>
+<div class="note-filter" id="noteFilter">読み込み後に表示されます</div>
+<div class="small">チェックした音だけ鳴らします（デフォルトはすべて選択）。</div>
+</div>
+<div>
+<label>リズム変更（%） — 演奏速度 (100 = 原曲)</label>
+<input type="range" id="tempoPercent" min="20" max="300" value="100">
+<div class="small">現在: <span id="tempoPercentLabel">100%</span></div>
+</div>
+<div class="controls-row">
+<label>音源</label>
+<select id="soundMode">
+<option value="samples">サンプル（/soundfonts/*.mp3）</option>
+<option value="synth">内蔵シンセ（サンプルなしでも可）</option>
+</select>
+</div>
+<div class="btns">
+<button id="playBtn">▶ 再生</button>
+<button id="pauseBtn" class="secondary">⏸ 一時停止</button>
+<button id="stopBtn" class="secondary">■ 停止</button>
+</div>
+<div>
+<label>進行表示</label>
+<div class="small">カーソルはOSMDの Iterator を走査してタイムスタンプを求め、正確に現在の縦位置を指します。テンポ変化にも対応。</div>
+</div>
+<div class="warning" id="warningArea" style="display:none"></div>
+</div>
+</div>
+<div class="panel" id="right">
+<div id="scoreContainer">
+<div id="score"></div>
+</div>
+</div>
+</main>
+<footer>
+必要ファイル例: <code>/music/song1.mxl</code>, <code>/music/song2.mxl</code>, <code>/music/song3.mxl</code>  
+サンプル音源 <code>/soundfonts/handbell_C4.mp3</code> を用意してください。  
+※ サンプルが無い場合は「内蔵シンセ」を選ぶと動作確認できます。
+</footer>
 
 <script>
-/*
-  Handbell MusicXML Player
-  - OSMD で楽譜描画
-  - OSMD の cursor.iterator を使って楽譜上のタイムスタンプを計算（テンポ変化対応）
-  - DOMでMusicXMLを解析して音高（C4 など）、開始秒、持続秒を算出（MXL対応）
-  - Tone.js でサンプル or シンセで再生
-  - カーソルは OSMD.cursor.next() をタイムラインに合わせて実行して正確に同期
-
-  参考:
-  - OSMD cursor / iterator API (GNotesUnderCursor, Iterator etc.)
-    https://opensheetmusicdisplay.github.io/classdoc/classes/Cursor.html
-  - OSMD tutorial: extracting note timing (use iterator.currentTimeStamp.realValue)
-    https://github.com/opensheetmusicdisplay/opensheetmusicdisplay/wiki/Tutorial---Extracting-note-timing-for-playing
-*/
-
-const SONGS = [
-  {label: '曲1 (song1.mxl)', file: 'music/song1.mxl'},
-  {label: '曲2 (song2.mxl)', file: 'music/song2.mxl'},
-  {label: '曲3 (song3.mxl)', file: 'music/song3.mxl'}
+/* Handbell MusicXML Player - Timewise対応版 */
+const SONGS=[
+{label:'曲1 (song1.mxl)', file:'music/song1.mxl'},
+{label:'曲2 (song2.mxl)', file:'music/song2.mxl'},
+{label:'曲3 (song3.mxl)', file:'music/song3.mxl'}
 ];
+const SAMPLE_BASE='soundfonts/';
+const songSelector=document.getElementById('songSelector');
+const partList=document.getElementById('partList');
+const noteFilter=document.getElementById('noteFilter');
+const playBtn=document.getElementById('playBtn');
+const pauseBtn=document.getElementById('pauseBtn');
+const stopBtn=document.getElementById('stopBtn');
+const tempoPercentInput=document.getElementById('tempoPercent');
+const tempoPercentLabel=document.getElementById('tempoPercentLabel');
+const warningArea=document.getElementById('warningArea');
+const soundMode=document.getElementById('soundMode');
+for(const s of SONGS){const opt=document.createElement('option');opt.value=s.file;opt.textContent=s.label;songSelector.appendChild(opt);}
+let osmd=null,parsedEvents=null,cursorTimeline=null,sampler=null,synth=null,scheduledIds=[],tempoPercent=100,isReady=false,selectedParts=new Set(),selectedPitches=new Set();
 
-const SAMPLE_BASE = 'soundfonts/'; // sample files should be SAMPLE_BASE + handbell_<Name>.mp3
-
-// UI refs
-const songSelector = document.getElementById('songSelector');
-const partList = document.getElementById('partList');
-const noteFilter = document.getElementById('noteFilter');
-const playBtn = document.getElementById('playBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-const stopBtn = document.getElementById('stopBtn');
-const tempoPercentInput = document.getElementById('tempoPercent');
-const tempoPercentLabel = document.getElementById('tempoPercentLabel');
-const warningArea = document.getElementById('warningArea');
-const soundMode = document.getElementById('soundMode');
-
-for(const s of SONGS){ const opt=document.createElement('option'); opt.value=s.file; opt.textContent=s.label; songSelector.appendChild(opt); }
-
-let osmd = null;
-let parsedEvents = null; // from XML parsing: [{startSec,durSec,pitch,partIndex,measureIndex}]
-let cursorTimeline = null; // array of times (seconds) from OSMD iterator positions
-let sampler = null; // Tone.Sampler when in samples mode
-let synth = null; // fallback synth
-let scheduledIds = [];
-let tempoPercent = 100;
-let isReady = false;
-let selectedParts = new Set();
-let selectedPitches = new Set();
-
-// ----- Utilities: load .mxl or .xml -----
+// ----- Load Music -----
 async function loadMusicFile(path){
-  const resp = await fetch(path);
+  const resp=await fetch(path);
   if(!resp.ok) throw new Error('ファイルが見つかりません: '+path);
-  const buf = await resp.arrayBuffer();
+  const buf=await resp.arrayBuffer();
   if(path.toLowerCase().endsWith('.mxl')){
-    const zip = await JSZip.loadAsync(buf);
-    let xmlFile = null;
-    zip.forEach((relPath,file)=>{ if(!xmlFile && relPath.toLowerCase().endsWith('.xml')) xmlFile = file; });
+    const zip=await JSZip.loadAsync(buf);
+    let xmlFile=null;
+    zip.forEach((relPath,file)=>{if(!xmlFile && relPath.toLowerCase().endsWith('.xml')) xmlFile=file;});
     if(!xmlFile) throw new Error('MXLの中にMusicXML(.xml)が見つかりません');
     return await xmlFile.async('text');
-  } else {
-    const decoder = new TextDecoder('utf-8');
-    return decoder.decode(buf);
-  }
+  } else {return new TextDecoder('utf-8').decode(buf);}
 }
 
-// ----- Parse MusicXML (DOM) to extract pitch names and timings (tempo changes supported) -----
-// Returns {events: [...], partsMeta: [...]}
+// ----- Timewise → Partwise -----
+function convertTimewiseToPartwise(doc){
+  const timewise=doc.querySelector('score-timewise');
+  if(!timewise) return doc;
+  const scorePartwise=doc.createElement('score-partwise');
+  const partListEl=doc.createElement('part-list');
+  const measures=Array.from(timewise.querySelectorAll('measure'));
+  const partIds=new Set();
+  measures.forEach(measure=>{const notes=Array.from(measure.querySelectorAll('note'));notes.forEach(note=>{const pid=note.parentElement.getAttribute('id')||'P1';partIds.add(pid);});});
+  Array.from(partIds).forEach((id,idx)=>{const sp=doc.createElement('score-part');sp.setAttribute('id',id);const nameEl=doc.createElement('part-name');nameEl.textContent=`Part ${idx+1}`;sp.appendChild(nameEl);partListEl.appendChild(sp);});
+  scorePartwise.appendChild(partListEl);
+  const partsMap={};
+  partIds.forEach(id=>{const partEl=doc.createElement('part');partEl.setAttribute('id',id);partsMap[id]=partEl;scorePartwise.appendChild(partEl);});
+  measures.forEach(measure=>{const partMeasures=measure.querySelectorAll('note, backup, forward');partMeasures.forEach(el=>{const pid=el.parentElement.getAttribute('id')||Array.from(partIds)[0];const clone=el.cloneNode(true);partsMap[pid].appendChild(clone);});});
+  return scorePartwise;
+}
+
+// ----- Parse MusicXML -----
 function parseMusicXML(xmlText){
-  const doc = new DOMParser().parseFromString(xmlText,'application/xml');
+  const doc=new DOMParser().parseFromString(xmlText,'application/xml');
   if(doc.querySelector('parsererror')) throw new Error('MusicXML の解析に失敗しました');
-
-  const scorePartwise = doc.querySelector('score-partwise');
+  let finalDoc=doc;
+  if(doc.querySelector('score-timewise')) finalDoc=convertTimewiseToPartwise(doc);
+  const scorePartwise=finalDoc.querySelector('score-partwise');
   if(!scorePartwise) throw new Error('MusicXML(score-partwise) が見つかりません');
-
-  const parts = Array.from(doc.querySelectorAll('part'));
-  const scoreParts = Array.from(doc.querySelectorAll('part-list score-part')).map(sp=>({id:sp.getAttribute('id'), name: sp.querySelector('part-name')?.textContent || sp.getAttribute('id')}));
-
-  const events = [];
-
+  const parts=Array.from(finalDoc.querySelectorAll('part'));
+  const scoreParts=Array.from(finalDoc.querySelectorAll('part-list score-part')).map(sp=>({id:sp.getAttribute('id'), name: sp.querySelector('part-name')?.textContent || sp.getAttribute('id')}));
+  const events=[];
   for(let pIndex=0;pIndex<parts.length;pIndex++){
-    const part = parts[pIndex];
-    let divisions = 1;
-    let timeInDivs = 0;
-    let currentTempo = 120;
-    const measures = Array.from(part.querySelectorAll('measure'));
+    const part=parts[pIndex];
+    let divisions=1,timeInDivs=0,currentTempo=120;
+    const measures=Array.from(part.querySelectorAll('measure'));
     for(let mIndex=0;mIndex<measures.length;mIndex++){
-      const measure = measures[mIndex];
-      const divEl = measure.querySelector('attributes > divisions');
-      if(divEl) divisions = parseInt(divEl.textContent);
-
-      // detect tempo in this measure (common forms)
-      const soundTempo = measure.querySelector('direction sound[tempo], sound[tempo]');
-      if(soundTempo && soundTempo.getAttribute('tempo')) currentTempo = parseFloat(soundTempo.getAttribute('tempo')) || currentTempo;
-      else {
-        const met = measure.querySelector('direction direction-type metronome');
-        if(met){ const per=met.querySelector('per-minute'); if(per) currentTempo = parseFloat(per.textContent) || currentTempo; }
-      }
-
-      const noteEls = Array.from(measure.querySelectorAll('note'));
+      const measure=measures[mIndex];
+      const divEl=measure.querySelector('attributes > divisions');if(divEl) divisions=parseInt(divEl.textContent);
+      const soundTempo=measure.querySelector('direction sound[tempo], sound[tempo]');
+      if(soundTempo && soundTempo.getAttribute('tempo')) currentTempo=parseFloat(soundTempo.getAttribute('tempo'))||currentTempo;
+      else {const met=measure.querySelector('direction direction-type metronome');if(met){const per=met.querySelector('per-minute');if(per) currentTempo=parseFloat(per.textContent)||currentTempo;}}
+      const noteEls=Array.from(measure.querySelectorAll('note'));
       for(const noteEl of noteEls){
-        const isRest = !!noteEl.querySelector('rest');
-        const durEl = noteEl.querySelector('duration');
-        const durDivs = durEl ? parseInt(durEl.textContent) : 0;
-        const isChord = !!noteEl.querySelector('chord');
-
-        if(isRest){ if(!isChord) timeInDivs += durDivs; continue; }
-
-        const step = noteEl.querySelector('pitch > step')?.textContent;
-        const alter = noteEl.querySelector('pitch > alter') ? parseInt(noteEl.querySelector('pitch > alter').textContent) : 0;
-        const octave = noteEl.querySelector('pitch > octave')?.textContent;
-        if(!step || !octave){ if(!isChord) timeInDivs += durDivs; continue; }
-        const pitchName = step + (alter===1? '#':'') + octave; // e.g. C#4
-
-        const secondsPerDiv = (60.0/currentTempo) / divisions;
-        const startSec = timeInDivs * secondsPerDiv;
-        const durSec = durDivs * secondsPerDiv;
-
+        const isRest=!!noteEl.querySelector('rest');const durEl=noteEl.querySelector('duration');const durDivs=durEl?parseInt(durEl.textContent):0;const isChord=!!noteEl.querySelector('chord');
+        if(isRest){if(!isChord) timeInDivs+=durDivs;continue;}
+        const step=noteEl.querySelector('pitch > step')?.textContent;
+        const alter=noteEl.querySelector('pitch > alter')?parseInt(noteEl.querySelector('pitch > alter').textContent):0;
+        const octave=noteEl.querySelector('pitch > octave')?.textContent;
+        if(!step||!octave){if(!isChord) timeInDivs+=durDivs;continue;}
+        const pitchName=step+(alter===1?'#':'')+octave;
+        const secondsPerDiv=(60.0/currentTempo)/divisions;
+        const startSec=timeInDivs*secondsPerDiv;
+        const durSec=durDivs*secondsPerDiv;
         events.push({startSec,durSec,pitch:pitchName,partIndex:pIndex,measureIndex:mIndex});
-
-        if(!isChord) timeInDivs += durDivs;
+        if(!isChord) timeInDivs+=durDivs;
       }
     }
   }
-
-  events.sort((a,b)=> a.startSec - b.startSec || b.durSec - a.durSec);
-  const partsMeta = parts.map((p,idx)=>({id:p.getAttribute('id')||`P${idx+1}`, name: scoreParts[idx]?.name || p.getAttribute('id') || `Part ${idx+1}`}));
-  return {events, partsMeta};
+  events.sort((a,b)=> a.startSec-b.startSec || b.durSec-a.durSec);
+  const partsMeta=parts.map((p,idx)=>({id:p.getAttribute('id')||`P${idx+1}`, name: scoreParts[idx]?.name||p.getAttribute('id')||`Part ${idx+1}`}));
+  return {events,partsMeta};
 }
 
-// ----- Build cursor timeline using OSMD iterator (accurate, tempo-aware) -----
+// ----- Build OSMD cursor timeline -----
 function buildCursorTimelineFromOSMD(){
-  // returns sorted array of times (sec) corresponding to each iterator step (vertical positions)
   if(!osmd) return [];
-  const times = [];
+  const times=[];
   try{
     osmd.cursor.resetIterator();
-    const iterator = osmd.cursor.Iterator;
-    // move iterator to very first position
-    // some versions need clone+move; resetIterator() should set to start
+    const iterator=osmd.cursor.Iterator;
     while(!iterator.EndReached){
-      const measureIdx = iterator.CurrentMeasureIndex;
-      const measure = osmd.sheet.SourceMeasures && osmd.sheet.SourceMeasures[measureIdx];
-      const bpm = (measure && measure.TempoInBPM) ? measure.TempoInBPM : (osmd.EngravingRules && osmd.EngravingRules.DefaultTempo ? osmd.EngravingRules.DefaultTempo : 120);
-      const timeStamp = iterator.currentTimeStamp ? iterator.currentTimeStamp.realValue : 0; // fraction of whole notes
-      const seconds = timeStamp * 4.0 * 60.0 / bpm; // convert from OSMD timestamp to seconds (tutorial formula)
+      const measureIdx=iterator.CurrentMeasureIndex;
+      const measure=osmd.sheet.SourceMeasures && osmd.sheet.SourceMeasures[measureIdx];
+      const bpm=(measure && measure.TempoInBPM)?measure.TempoInBPM:(osmd.EngravingRules && osmd.EngravingRules.DefaultTempo?osmd.EngravingRules.DefaultTempo:120);
+      const timeStamp=iterator.currentTimeStamp?iterator.currentTimeStamp.realValue:0;
+      const seconds=timeStamp*4.0*60.0/bpm;
       times.push(seconds);
       iterator.moveToNext();
     }
-  }catch(e){ console.warn('buildCursorTimelineFromOSMD error',e); }
-  // dedupe and sort
-  const uniq = Array.from(new Set(times)).sort((a,b)=>a-b);
+  }catch(e){console.warn('buildCursorTimelineFromOSMD error',e);}
+  const uniq=Array.from(new Set(times)).sort((a,b)=>a-b);
   return uniq;
 }
 
-// ----- Sampler or synth preparation -----
-function toSampleName(pitch){
-  // C#4 -> Cs4 (file naming convention), C4 -> C4
-  return pitch.replace('#','s');
-}
-
+// ----- Sampler/Synth -----
+function toSampleName(pitch){return pitch.replace('#','s');}
 async function prepareSampler(usedPitches){
-  // usedPitches: array of pitch strings e.g. ['C3','D4']
-  if(sampler){ sampler.dispose(); sampler = null; }
-  if(!usedPitches || usedPitches.length===0) return;
-
-  const urls = {};
-  for(const p of usedPitches){ urls[p] = `handbell_${toSampleName(p)}.mp3`; }
-
-  try{
-    sampler = new Tone.Sampler({ urls, baseUrl: SAMPLE_BASE, onload: ()=>console.log('sampler loaded') }).toDestination();
-    // note: if files missing, Tone will log errors; we provide a synth fallback option in UI
-  }catch(err){ console.warn('prepareSampler',err); sampler=null; }
+  if(sampler){sampler.dispose();sampler=null;}
+  if(!usedPitches||usedPitches.length===0) return;
+  const urls={};
+  for(const p of usedPitches){urls[p]=`handbell_${toSampleName(p)}.mp3`;}
+  try{sampler=new Tone.Sampler({urls,baseUrl:SAMPLE_BASE,onload:()=>console.log('sampler loaded')}).toDestination();}
+  catch(err){console.warn('prepareSampler',err);sampler=null;}
 }
+function prepareSynth(){if(synth) synth.dispose();synth=new Tone.PolySynth(Tone.Synth,{volume:-6,oscillator:{type:'sine'}}).toDestination();}
 
-function prepareSynth(){
-  if(synth) synth.dispose();
-  synth = new Tone.PolySynth(Tone.Synth, {volume:-6, oscillator:{type:'sine'}}).toDestination();
-}
-
-// ----- Scheduling playback -----
-function schedulePlayback(events, cursorTimes){
-  Tone.Transport.cancel(); scheduledIds=[];
-  if(!events || events.length===0){ warningArea.style.display='block'; warningArea.textContent='再生可能なノートが見つかりません'; return; }
+// ----- Playback scheduling -----
+function schedulePlayback(events,cursorTimes){
+  Tone.Transport.cancel();scheduledIds=[];
+  if(!events||events.length===0){warningArea.style.display='block';warningArea.textContent='再生可能なノートが見つかりません';return;}
   warningArea.style.display='none';
-
-  const tempoMul = tempoPercent/100.0;
-
-  // schedule audio events
+  const tempoMul=tempoPercent/100.0;
   for(const ev of events){
-    const t = ev.startSec / tempoMul;
-    const dur = Math.max(0.01, ev.durSec / tempoMul);
-    const note = ev.pitch; // 'C4' etc
-    const id = Tone.Transport.schedule((time)=>{
+    const t=ev.startSec/tempoMul;
+    const dur=Math.max(0.01,ev.durSec/tempoMul);
+    const note=ev.pitch;
+    const id=Tone.Transport.schedule((time)=>{
       if(soundMode.value==='samples' && sampler){
-        // if sampler has the sample, trigger; otherwise fall back to synth
-        try{ sampler.triggerAttackRelease(note, dur, time); }
-        catch(e){ if(!synth) prepareSynth(); synth.triggerAttackRelease(note, dur, time); }
-      } else {
-        if(!synth) prepareSynth(); synth.triggerAttackRelease(note, dur, time);
-      }
-    }, t);
+        try{sampler.triggerAttackRelease(note,dur,time);}
+        catch(e){if(!synth) prepareSynth(); synth.triggerAttackRelease(note,dur,time);}
+      }else{if(!synth) prepareSynth(); synth.triggerAttackRelease(note,dur,time);}
+    },t);
     scheduledIds.push(id);
   }
-
-  // schedule cursor moves (use OSMD cursor.next() at each cursorTimes)
-  if(cursorTimes && cursorTimes.length>0 && osmd && osmd.cursor){
-    osmd.cursor.reset(); osmd.cursor.show();
-    // ensure cursor Iterator is at start
-    osmd.cursor.resetIterator();
+  if(cursorTimes&&cursorTimes.length>0&&osmd&&osmd.cursor){
+    osmd.cursor.reset();osmd.cursor.show();osmd.cursor.resetIterator();
     for(let i=0;i<cursorTimes.length;i++){
-      const t = cursorTimes[i]/tempoMul;
-      const id = Tone.Transport.schedule((time)=>{
-        try{ osmd.cursor.next(); }catch(e){ /* ignore */ }
-      }, t);
+      const t=cursorTimes[i]/tempoMul;
+      const id=Tone.Transport.schedule(()=>{try{osmd.cursor.next();}catch(e){}},t);
       scheduledIds.push(id);
     }
-    // schedule cursor hide at end
-    const last = cursorTimes[cursorTimes.length-1]/tempoMul + 1.0;
-    Tone.Transport.schedule(()=>{ osmd.cursor.reset(); osmd.cursor.hide(); }, last);
+    const last=cursorTimes[cursorTimes.length-1]/tempoMul+1.0;
+    Tone.Transport.schedule(()=>{osmd.cursor.reset();osmd.cursor.hide();},last);
   }
 }
 
 // ----- Controls -----
-playBtn.addEventListener('click', async ()=>{
-  if(!isReady){ alert('曲がロードされていません'); return; }
-  await Tone.start();
-  Tone.Transport.start();
+playBtn.addEventListener('click',async()=>{if(!isReady){alert('曲がロードされていません');return;}await Tone.start();Tone.Transport.start();});
+pauseBtn.addEventListener('click',()=>{Tone.Transport.toggle();});
+stopBtn.addEventListener('click',()=>{Tone.Transport.stop();Tone.Transport.cancel();if(osmd&&osmd.cursor){osmd.cursor.reset();osmd.cursor.hide();}});
+
+songSelector.addEventListener('change',()=>loadAndRender(songSelector.value));
+tempoPercentInput.addEventListener('input',()=>{
+  tempoPercent=parseInt(tempoPercentInput.value);
+  tempoPercentLabel.textContent=tempoPercent+'%';
+  if(parsedEvents&&cursorTimeline){schedulePlayback(parsedEvents,cursorTimeline);}
+});
+soundMode.addEventListener('change',()=>{
+  if(soundMode.value==='synth'){if(sampler){sampler.dispose();sampler=null;}if(!synth) prepareSynth();}
+  else{if(synth){synth.dispose();synth=null;}if(parsedEvents){prepareSampler(Array.from(new Set(parsedEvents.map(e=>e.pitch))));}}
 });
 
-pauseBtn.addEventListener('click', ()=>{ Tone.Transport.toggle(); });
-stopBtn.addEventListener('click', ()=>{ Tone.Transport.stop(); Tone.Transport.cancel(); if(osmd && osmd.cursor){ osmd.cursor.reset(); osmd.cursor.hide(); } });
-
-songSelector.addEventListener('change', ()=> loadAndRender(songSelector.value));
-tempoPercentInput.addEventListener('input', ()=>{
-  tempoPercent = parseInt(tempoPercentInput.value);
-  tempoPercentLabel.textContent = tempoPercent + '%';
-  if(parsedEvents && cursorTimeline){ schedulePlayback(parsedEvents, cursorTimeline); }
-});
-
-soundMode.addEventListener('change', ()=>{
-  // rebuild sampler/synth if needed
-  if(soundMode.value==='synth'){ if(sampler){ sampler.dispose(); sampler=null; } if(!synth) prepareSynth(); }
-  else { if(synth){ synth.dispose(); synth=null; } if(parsedEvents){ prepareSampler(Array.from(new Set(parsedEvents.map(e=>e.pitch)))); }
-  }
-});
-
-// ----- Load & Render flow -----
-async function loadAndRender(path){
-  isReady=false; warningArea.style.display='none';
-  try{
-    const text = await loadMusicFile(path);
-    // init OSMD
-    if(!osmd) osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay('score', {autoResize:true});
-    // Optional: ensure cursor plays already started notes when starting mid-score
-    if(osmd.EngravingRules) osmd.EngravingRules.PlayAlreadyStartedNotesFromCursorPosition = true;
-
-    await osmd.load(text);
-    await osmd.render();
-
-    // parse events from XML (explicit pitch strings)
-    const parsed = parseMusicXML(text);
-    parsedEvents = parsed.events;
-
-    // build UI: parts & pitch filters
-    buildPartList(parsed.partsMeta);
-    buildPitchFilter(parsedEvents.map(e=>e.pitch));
-
-    // build cursor timeline from OSMD iterator
-    cursorTimeline = buildCursorTimelineFromOSMD();
-
-    // prepare audio based on selected mode
-    if(soundMode.value==='samples'){
-      await prepareSampler(Array.from(new Set(parsedEvents.map(e=>e.pitch))));
-    } else {
-      prepareSynth();
-    }
-
-    schedulePlayback(parsedEvents, cursorTimeline);
-    isReady=true;
-  }catch(err){ console.error(err); warningArea.style.display='block'; warningArea.textContent = err.message || String(err); }
-}
-
+// ----- Part & Pitch Filter -----
 function buildPartList(partsMeta){
-  partList.innerHTML=''; selectedParts.clear();
+  partList.innerHTML='';selectedParts.clear();
   for(const [i,p] of partsMeta.entries()){
-    const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true; chk.value=i;
-    chk.addEventListener('change', ()=>{ if(chk.checked) selectedParts.add(i); else selectedParts.delete(i); rebuildFilteredPlayback(); });
+    const chk=document.createElement('input');chk.type='checkbox';chk.checked=true;chk.value=i;
+    chk.addEventListener('change',()=>{if(chk.checked) selectedParts.add(i);else selectedParts.delete(i);rebuildFilteredPlayback();});
     selectedParts.add(i);
-    const label = document.createElement('label'); label.style.display='block'; label.appendChild(chk); label.append(' ' + (p.name||`Part ${i+1}`));
+    const label=document.createElement('label');label.style.display='block';label.appendChild(chk);label.append(' '+(p.name||`Part ${i+1}`));
     partList.appendChild(label);
   }
 }
-
 function buildPitchFilter(pitches){
-  noteFilter.innerHTML=''; selectedPitches.clear();
-  const unique = Array.from(new Set(pitches)).sort();
+  noteFilter.innerHTML='';selectedPitches.clear();
+  const unique=Array.from(new Set(pitches)).sort();
   for(const p of unique){
-    const chk = document.createElement('input'); chk.type='checkbox'; chk.checked=true; chk.value=p;
-    chk.addEventListener('change', ()=>{ if(chk.checked) selectedPitches.add(p); else selectedPitches.delete(p); rebuildFilteredPlayback(); });
+    const chk=document.createElement('input');chk.type='checkbox';chk.checked=true;chk.value=p;
+    chk.addEventListener('change',()=>{if(chk.checked) selectedPitches.add(p);else selectedPitches.delete(p);rebuildFilteredPlayback();});
     selectedPitches.add(p);
-    const label = document.createElement('label'); label.style.whiteSpace='nowrap'; label.appendChild(chk); label.append(' ' + p);
+    const label=document.createElement('label');label.style.whiteSpace='nowrap';label.appendChild(chk);label.append(' '+p);
     noteFilter.appendChild(label);
   }
 }
+function rebuildFilteredPlayback(){if(!parsedEvents) return;const filtered=parsedEvents.filter(ev=>selectedPitches.has(ev.pitch)&&selectedParts.has(ev.partIndex));schedulePlayback(filtered,cursorTimeline);}
 
-function rebuildFilteredPlayback(){
-  if(!parsedEvents) return;
-  const filtered = parsedEvents.filter(ev => selectedPitches.has(ev.pitch) && selectedParts.has(ev.partIndex));
-  schedulePlayback(filtered, cursorTimeline);
+// ----- Load & Render -----
+async function loadAndRender(path){
+  isReady=false;warningArea.style.display='none';
+  try{
+    const text=await loadMusicFile(path);
+    if(!osmd) osmd=new opensheetmusicdisplay.OpenSheetMusicDisplay('score',{autoResize:true});
+    if(osmd.EngravingRules) osmd.EngravingRules.PlayAlreadyStartedNotesFromCursorPosition=true;
+    await osmd.load(text);await osmd.render();
+    const parsed=parseMusicXML(text);parsedEvents=parsed.events;
+    buildPartList(parsed.partsMeta);buildPitchFilter(parsedEvents.map(e=>e.pitch));
+    cursorTimeline=buildCursorTimelineFromOSMD();
+    if(soundMode.value==='samples'){await prepareSampler(Array.from(new Set(parsedEvents.map(e=>e.pitch))));}else{prepareSynth();}
+    schedulePlayback(parsedEvents,cursorTimeline);
+    isReady=true;
+  }catch(err){console.error(err);warningArea.style.display='block';warningArea.textContent=err.message||String(err);}
 }
 
-// initial load
-loadAndRender(songSelector.value || SONGS[0].file);
-
+// 初期ロード
+loadAndRender(songSelector.value||SONGS[0].file);
 </script>
 </body>
 </html>
