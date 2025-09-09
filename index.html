@@ -92,7 +92,6 @@ footer{padding:12px;text-align:center;font-size:12px;color:#666}
 </footer>
 
 <script>
-/* Handbell MusicXML Player - Timewise対応版 */
 const SONGS=[
 {label:'曲1 (song1.mxl)', file:'music/song1.mxl'},
 {label:'曲2 (song2.mxl)', file:'music/song2.mxl'},
@@ -112,7 +111,7 @@ const soundMode=document.getElementById('soundMode');
 for(const s of SONGS){const opt=document.createElement('option');opt.value=s.file;opt.textContent=s.label;songSelector.appendChild(opt);}
 let osmd=null,parsedEvents=null,cursorTimeline=null,sampler=null,synth=null,scheduledIds=[],tempoPercent=100,isReady=false,selectedParts=new Set(),selectedPitches=new Set();
 
-// ----- Load Music -----
+// load music
 async function loadMusicFile(path){
   const resp=await fetch(path);
   if(!resp.ok) throw new Error('ファイルが見つかりません: '+path);
@@ -126,33 +125,50 @@ async function loadMusicFile(path){
   } else {return new TextDecoder('utf-8').decode(buf);}
 }
 
-// ----- Timewise → Partwise -----
+// timewise → partwise
 function convertTimewiseToPartwise(doc){
   const timewise=doc.querySelector('score-timewise');
   if(!timewise) return doc;
-  const scorePartwise=doc.createElement('score-partwise');
-  const partListEl=doc.createElement('part-list');
+  const newDoc=document.implementation.createDocument(null,'score-partwise',null);
+  const scorePartwise=newDoc.documentElement;
+  const partListEl=newDoc.createElement('part-list');
   const measures=Array.from(timewise.querySelectorAll('measure'));
   const partIds=new Set();
-  measures.forEach(measure=>{const notes=Array.from(measure.querySelectorAll('note'));notes.forEach(note=>{const pid=note.parentElement.getAttribute('id')||'P1';partIds.add(pid);});});
-  Array.from(partIds).forEach((id,idx)=>{const sp=doc.createElement('score-part');sp.setAttribute('id',id);const nameEl=doc.createElement('part-name');nameEl.textContent=`Part ${idx+1}`;sp.appendChild(nameEl);partListEl.appendChild(sp);});
+  measures.forEach(measure=>{
+    const notes=Array.from(measure.querySelectorAll('note'));
+    notes.forEach(note=>{
+      const pid=note.parentElement.getAttribute('id')||'P1';
+      partIds.add(pid);
+    });
+  });
+  Array.from(partIds).forEach((id,idx)=>{
+    const sp=newDoc.createElement('score-part');sp.setAttribute('id',id);
+    const nameEl=newDoc.createElement('part-name');nameEl.textContent=`Part ${idx+1}`;
+    sp.appendChild(nameEl);partListEl.appendChild(sp);
+  });
   scorePartwise.appendChild(partListEl);
   const partsMap={};
-  partIds.forEach(id=>{const partEl=doc.createElement('part');partEl.setAttribute('id',id);partsMap[id]=partEl;scorePartwise.appendChild(partEl);});
-  measures.forEach(measure=>{const partMeasures=measure.querySelectorAll('note, backup, forward');partMeasures.forEach(el=>{const pid=el.parentElement.getAttribute('id')||Array.from(partIds)[0];const clone=el.cloneNode(true);partsMap[pid].appendChild(clone);});});
-  return scorePartwise;
+  partIds.forEach(id=>{
+    const partEl=newDoc.createElement('part');partEl.setAttribute('id',id);
+    partsMap[id]=partEl;scorePartwise.appendChild(partEl);
+  });
+  measures.forEach(measure=>{
+    const pid=Array.from(partIds)[0];
+    const clone=newDoc.importNode(measure,true);
+    partsMap[pid].appendChild(clone);
+  });
+  return newDoc;
 }
 
-// ----- Parse MusicXML -----
+// parse musicxml
 function parseMusicXML(xmlText){
-  const doc=new DOMParser().parseFromString(xmlText,'application/xml');
+  let doc=new DOMParser().parseFromString(xmlText,'application/xml');
   if(doc.querySelector('parsererror')) throw new Error('MusicXML の解析に失敗しました');
-  let finalDoc=doc;
-  if(doc.querySelector('score-timewise')) finalDoc=convertTimewiseToPartwise(doc);
-  const scorePartwise=finalDoc.querySelector('score-partwise');
+  if(doc.querySelector('score-timewise')) doc=convertTimewiseToPartwise(doc);
+  const scorePartwise=doc.querySelector('score-partwise');
   if(!scorePartwise) throw new Error('MusicXML(score-partwise) が見つかりません');
-  const parts=Array.from(finalDoc.querySelectorAll('part'));
-  const scoreParts=Array.from(finalDoc.querySelectorAll('part-list score-part')).map(sp=>({id:sp.getAttribute('id'), name: sp.querySelector('part-name')?.textContent || sp.getAttribute('id')}));
+  const parts=Array.from(doc.querySelectorAll('part'));
+  const scoreParts=Array.from(doc.querySelectorAll('part-list score-part')).map(sp=>({id:sp.getAttribute('id'), name: sp.querySelector('part-name')?.textContent || sp.getAttribute('id')}));
   const events=[];
   for(let pIndex=0;pIndex<parts.length;pIndex++){
     const part=parts[pIndex];
@@ -186,7 +202,7 @@ function parseMusicXML(xmlText){
   return {events,partsMeta};
 }
 
-// ----- Build OSMD cursor timeline -----
+// build cursor timeline
 function buildCursorTimelineFromOSMD(){
   if(!osmd) return [];
   const times=[];
@@ -203,23 +219,21 @@ function buildCursorTimelineFromOSMD(){
       iterator.moveToNext();
     }
   }catch(e){console.warn('buildCursorTimelineFromOSMD error',e);}
-  const uniq=Array.from(new Set(times)).sort((a,b)=>a-b);
-  return uniq;
+  return Array.from(new Set(times)).sort((a,b)=>a-b);
 }
 
-// ----- Sampler/Synth -----
+// sampler/synth
 function toSampleName(pitch){return pitch.replace('#','s');}
 async function prepareSampler(usedPitches){
   if(sampler){sampler.dispose();sampler=null;}
   if(!usedPitches||usedPitches.length===0) return;
   const urls={};
   for(const p of usedPitches){urls[p]=`handbell_${toSampleName(p)}.mp3`;}
-  try{sampler=new Tone.Sampler({urls,baseUrl:SAMPLE_BASE,onload:()=>console.log('sampler loaded')}).toDestination();}
-  catch(err){console.warn('prepareSampler',err);sampler=null;}
+  sampler=new Tone.Sampler({urls,baseUrl:SAMPLE_BASE}).toDestination();
 }
 function prepareSynth(){if(synth) synth.dispose();synth=new Tone.PolySynth(Tone.Synth,{volume:-6,oscillator:{type:'sine'}}).toDestination();}
 
-// ----- Playback scheduling -----
+// playback
 function schedulePlayback(events,cursorTimes){
   Tone.Transport.cancel();scheduledIds=[];
   if(!events||events.length===0){warningArea.style.display='block';warningArea.textContent='再生可能なノートが見つかりません';return;}
@@ -229,27 +243,25 @@ function schedulePlayback(events,cursorTimes){
     const t=ev.startSec/tempoMul;
     const dur=Math.max(0.01,ev.durSec/tempoMul);
     const note=ev.pitch;
-    const id=Tone.Transport.schedule((time)=>{
+    Tone.Transport.schedule((time)=>{
       if(soundMode.value==='samples' && sampler){
         try{sampler.triggerAttackRelease(note,dur,time);}
         catch(e){if(!synth) prepareSynth(); synth.triggerAttackRelease(note,dur,time);}
       }else{if(!synth) prepareSynth(); synth.triggerAttackRelease(note,dur,time);}
     },t);
-    scheduledIds.push(id);
   }
   if(cursorTimes&&cursorTimes.length>0&&osmd&&osmd.cursor){
     osmd.cursor.reset();osmd.cursor.show();osmd.cursor.resetIterator();
     for(let i=0;i<cursorTimes.length;i++){
       const t=cursorTimes[i]/tempoMul;
-      const id=Tone.Transport.schedule(()=>{try{osmd.cursor.next();}catch(e){}},t);
-      scheduledIds.push(id);
+      Tone.Transport.schedule(()=>{try{osmd.cursor.next();}catch(e){}},t);
     }
     const last=cursorTimes[cursorTimes.length-1]/tempoMul+1.0;
     Tone.Transport.schedule(()=>{osmd.cursor.reset();osmd.cursor.hide();},last);
   }
 }
 
-// ----- Controls -----
+// controls
 playBtn.addEventListener('click',async()=>{if(!isReady){alert('曲がロードされていません');return;}await Tone.start();Tone.Transport.start();});
 pauseBtn.addEventListener('click',()=>{Tone.Transport.toggle();});
 stopBtn.addEventListener('click',()=>{Tone.Transport.stop();Tone.Transport.cancel();if(osmd&&osmd.cursor){osmd.cursor.reset();osmd.cursor.hide();}});
@@ -265,7 +277,7 @@ soundMode.addEventListener('change',()=>{
   else{if(synth){synth.dispose();synth=null;}if(parsedEvents){prepareSampler(Array.from(new Set(parsedEvents.map(e=>e.pitch))));}}
 });
 
-// ----- Part & Pitch Filter -----
+// part & pitch filter
 function buildPartList(partsMeta){
   partList.innerHTML='';selectedParts.clear();
   for(const [i,p] of partsMeta.entries()){
@@ -289,7 +301,7 @@ function buildPitchFilter(pitches){
 }
 function rebuildFilteredPlayback(){if(!parsedEvents) return;const filtered=parsedEvents.filter(ev=>selectedPitches.has(ev.pitch)&&selectedParts.has(ev.partIndex));schedulePlayback(filtered,cursorTimeline);}
 
-// ----- Load & Render -----
+// load & render
 async function loadAndRender(path){
   isReady=false;warningArea.style.display='none';
   try{
