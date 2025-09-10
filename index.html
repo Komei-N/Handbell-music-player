@@ -131,7 +131,6 @@ let totalDuration = 0;    // seconds (original score tempo)
 let partNames = [];
 let pitchNames = [];
 let toneParts = [];       // Tone.Part per partIndex (max 3)
-let transportUpdaterId = null;
 
 /* ====== Initialize UI and libraries ====== */
 (function init(){
@@ -146,7 +145,6 @@ let transportUpdaterId = null;
   reloadBtn.addEventListener('click', ()=> loadSong(songSelect.value));
   tempoPercent.addEventListener('input', ()=>{
     tempoLabel.textContent = tempoPercent.value + '%';
-    // if playing, reschedule to reflect tempo change
     if(Tone.Transport.state === 'started'){
       const sec = Tone.Transport.seconds;
       rescheduleFrom(sec);
@@ -204,23 +202,21 @@ async function loadSong(name){
     osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(osmdCanvas, {
       drawingParameters: 'compact',
       autoResize: true,
-      // make the page wide so staves render horizontally continuous
       pageFormat: { width: 2000, height: 400 }
     });
   }
 
-  // Ensure OSMD loads using URL (safer) — pass URL (some OSMD builds auto-fetch)
+  // Try to load by URL first (preferred), else fallback to xmlText
   try{
-    await osmd.load(url);    // important: pass URL (not raw XML string)
+    await osmd.load(url);
     await osmd.render();
-    log('OSMD: 描画完了');
+    log('OSMD: 描画完了 (URL)');
   }catch(e){
-    // fallback: if load(url) fails, try load from XML string (some versions accept xml)
-    log('OSMD load(url)失敗、xmlTextでloadを試みます: ' + e.message);
+    log('OSMD load(url)失敗、xmlTextでload試行: ' + e.message);
     try{
       await osmd.load(xmlText);
       await osmd.render();
-      log('OSMD: XML文字列から描画完了（フォールバック）');
+      log('OSMD: 描画完了 (xmlText フォールバック)');
     }catch(e2){
       console.error(e2);
       alert('楽譜の描画に失敗しました（詳細はコンソール）。');
@@ -255,7 +251,6 @@ function parseMusicXML(xmlText){
   const parser = new DOMParser();
   const xml = parser.parseFromString(xmlText,'application/xml');
   const partNodes = Array.from(xml.querySelectorAll('part'));
-  // build part names (score-part entries)
   const partList = Array.from(xml.querySelectorAll('score-part')).map(p => {
     const nameNode = p.querySelector('part-name');
     return nameNode ? nameNode.textContent.trim() : p.getAttribute('id') || 'Part';
@@ -310,24 +305,32 @@ function pitchToMidi(step, oct, alter){
 /* ====== UI render for parts & pitches ====== */
 function renderPartUI(){
   partsContainer.innerHTML = '';
+  // if no part names found, create placeholders
+  if(!partNames || partNames.length === 0){
+    partNames = ['Part 1','Part 2','Part 3'];
+  }
   partNames.forEach((pn, i) => {
     const label = document.createElement('label');
     label.innerHTML = `<input type="checkbox" checked data-index="${i}"> ${pn}`;
     partsContainer.appendChild(label);
     label.querySelector('input').addEventListener('change', () => {
-      // re-render OSMD to show/hide parts
       updateFilters();
     });
   });
 }
 function renderPitchUI(){
   pitchesContainer.innerHTML = '';
+  // unique pitch names already computed
+  if(!pitchNames || pitchNames.length === 0){
+    // fallback: collect some from parsedEvents or provide common pitches
+    const fallback = Array.from(new Set(parsedEvents.map(e=>e.pitchName))).slice(0,12);
+    pitchNames = fallback.length ? fallback : ['C4','D4','E4'];
+  }
   pitchNames.forEach(p => {
     const label = document.createElement('label');
     label.innerHTML = `<input type="checkbox" checked data-pitch="${p}"> ${p}`;
     pitchesContainer.appendChild(label);
     label.querySelector('input').addEventListener('change', () => {
-      // playback filter - no immediate re-render of OSMD (user requested only parts removed from display)
       updateFilters();
     });
   });
@@ -336,14 +339,27 @@ function renderPitchUI(){
 /* ====== Filters: apply part visibility and playback filters ====== */
 async function updateFilters(){
   // which parts selected
-  const selectedParts = Array.from(partsContainer.querySelectorAll('input'))
+  let selectedParts = Array.from(partsContainer.querySelectorAll('input'))
     .map(i => i.checked ? parseInt(i.getAttribute('data-index')) : null)
     .filter(x => x !== null);
 
   // which pitches selected (for playback)
-  const selectedPitches = Array.from(pitchesContainer.querySelectorAll('input'))
+  let selectedPitches = Array.from(pitchesContainer.querySelectorAll('input'))
     .map(i => i.checked ? i.getAttribute('data-pitch') : null)
     .filter(Boolean);
+
+  // If user has unchecked everything, restore all by default
+  if(selectedParts.length === 0){
+    // check all in UI
+    Array.from(partsContainer.querySelectorAll('input')).forEach(cb => cb.checked = true);
+    selectedParts = Array.from(partsContainer.querySelectorAll('input')).map(i=>parseInt(i.getAttribute('data-index')));
+    log('注意: パートが未選択だったため全選択に戻しました。');
+  }
+  if(selectedPitches.length === 0){
+    Array.from(pitchesContainer.querySelectorAll('input')).forEach(cb => cb.checked = true);
+    selectedPitches = Array.from(pitchesContainer.querySelectorAll('input')).map(i => i.getAttribute('data-pitch'));
+    log('注意: ピッチが未選択だったため全選択に戻しました。');
+  }
 
   // Use osmd.setOptions({drawOnlyParts: [...]}) to show/hide parts
   try{
@@ -357,80 +373,93 @@ async function updateFilters(){
   // Reschedule playback according to current selections (preserve current transport time if playing)
   const currentlyPlaying = (Tone.Transport.state === 'started');
   const currentSec = Tone.Transport.seconds;
+
   // dispose existing parts
   for(const p of toneParts){ try{ p.dispose(); }catch(_){} }
   toneParts = [];
 
-  scheduleToneParts(); // creates new toneParts but does not start Transport
+  scheduleToneParts();
 
   if(currentlyPlaying){
-    // resume at same logical time (sec), because scheduleToneParts used scaled times
     Tone.Transport.start(undefined, currentSec);
   } else {
-    // ensure transport is stopped
     Tone.Transport.stop();
-    // update progress display to current pause time
     updateCursorOnce();
   }
 }
 
 /* ====== Schedule Tone.Part per part (stable playback) ====== */
 function scheduleToneParts(){
-  // clear previous schedules
-  Tone.Transport.cancel(); // clears callbacks, keeps parts until disposed
+  // clear previous schedules / callbacks
+  Tone.Transport.cancel();
+  // dispose any existing parts
+  for(const p of toneParts){ try{ p.dispose(); }catch(_){ } }
   toneParts = [];
 
   // which parts and pitches are selected
-  const selectedParts = Array.from(partsContainer.querySelectorAll('input'))
+  let selectedParts = Array.from(partsContainer.querySelectorAll('input'))
     .map(i => i.checked ? parseInt(i.getAttribute('data-index')) : null)
     .filter(x => x !== null);
-
-  const selectedPitches = Array.from(pitchesContainer.querySelectorAll('input'))
+  let selectedPitches = Array.from(pitchesContainer.querySelectorAll('input'))
     .map(i => i.checked ? i.getAttribute('data-pitch') : null)
     .filter(Boolean);
 
-  if(selectedParts.length === 0 || selectedPitches.length === 0){
-    log('再生対象がなくなりました（パートまたはピッチが未選択）。');
-    totalDuration = parsedEvents.length ? parsedEvents.reduce((m,e)=>Math.max(m,e.time+e.duration),0) : 0;
-    durationLabel.textContent = formatTime(totalDuration);
-    return;
+  // if none selected, default to all (and ensure UI is checked)
+  if(selectedParts.length === 0){
+    Array.from(partsContainer.querySelectorAll('input')).forEach(cb=>cb.checked = true);
+    selectedParts = Array.from(partsContainer.querySelectorAll('input')).map(i=>parseInt(i.getAttribute('data-index')));
+  }
+  if(selectedPitches.length === 0){
+    Array.from(pitchesContainer.querySelectorAll('input')).forEach(cb=>cb.checked = true);
+    selectedPitches = Array.from(pitchesContainer.querySelectorAll('input')).map(i=>i.getAttribute('data-pitch'));
   }
 
   const tempoScale = parseInt(tempoPercent.value) / 100;
 
-  // Build event arrays per partIndex (max 3)
+  // Build event arrays per selected part
   for(const partIndex of selectedParts){
     const partEvents = parsedEvents
       .filter(e => e.partIndex === partIndex && selectedPitches.includes(e.pitchName))
       .map(e => ({ time: e.time / tempoScale, duration: e.duration / tempoScale, midi: e.midi }));
-    if(partEvents.length === 0) continue;
+
+    if(partEvents.length === 0) {
+      // no notes for this part & pitch selection — skip creating a Tone.Part
+      log(`パート ${partIndex} に再生イベントがありません（選択フィルタ適用後）`);
+      continue;
+    }
 
     // Create Tone.Part for this part
     const p = new Tone.Part((time, val) => {
       synth.triggerAttackRelease(Tone.Frequency(val.midi, 'midi'), val.duration, time);
     }, partEvents);
+
     p.start(0);
     toneParts.push(p);
   }
 
-  // schedule cursor updater regularly (using Transport scheduleRepeat)
-  Tone.Transport.scheduleRepeat(updateCursorOnce, 0.03); // 30ms tick for smooth cursor
-  // compute effective total duration (scaled by tempo)
-  const tempoScaleUsed = tempoScale;
-  const effectiveTotal = totalDuration / tempoScaleUsed;
+  if(toneParts.length === 0){
+    log('注意: フィルタ適用後、再生対象がありません（パート/ピッチを確認してください）。');
+    // compute totalDuration unchanged (original), update UI
+    durationLabel.textContent = formatTime(totalDuration);
+    return;
+  }
+
+  // schedule cursor updater regularly (Transport.scheduleRepeat)
+  // cancel earlier scheduled callbacks first (we did Tone.Transport.cancel() above)
+  Tone.Transport.scheduleRepeat(updateCursorOnce, 0.03);
+
+  // compute effective total duration considering tempo
+  const effectiveTotal = totalDuration / (parseInt(tempoPercent.value) / 100);
   durationLabel.textContent = formatTime(effectiveTotal);
 }
 
 /* ====== Playback control ====== */
 async function playMusic(){
-  // ensure Tone started by user action
   await Tone.start();
   if(toneParts.length === 0){
     scheduleToneParts();
   }
-  // If transport already started, do nothing; else start from current paused position
   if(Tone.Transport.state !== 'started'){
-    // when starting, if Transport.seconds > 0 (paused), resume; else start from 0
     Tone.Transport.start();
   }
   log('再生開始');
@@ -443,10 +472,10 @@ function stopMusic(){
   if(Tone.Transport.state === 'started' || Tone.Transport.state === 'paused'){
     Tone.Transport.stop();
   }
-  // dispose toneParts
-  for(const p of toneParts){ try{ p.dispose(); }catch(_){} }
+  for(const p of toneParts){ try{ p.dispose(); }catch(_){}
+  }
   toneParts = [];
-  Tone.Transport.cancel(); // cancel scheduled updates
+  Tone.Transport.cancel();
   progressBar.style.width = '0%';
   timeLabel.textContent = '0:00';
   cursorLine.style.display = 'none';
@@ -455,23 +484,18 @@ function stopMusic(){
 
 /* ====== Update cursor and auto-scroll (called frequently) ====== */
 function updateCursorOnce(){
-  // compute effective total considering tempo
   const tempoScale = parseInt(tempoPercent.value)/100;
   const effectiveTotal = totalDuration / tempoScale;
   const sec = Tone.Transport.seconds;
   const pct = effectiveTotal > 0 ? Math.min(1, sec / effectiveTotal) : 0;
-  // bar
   progressBar.style.width = (pct * 100) + '%';
   timeLabel.textContent = formatTime(sec);
-  // cursor position across osmdCanvas scrollWidth
   const width = osmdCanvas.scrollWidth || osmdCanvas.clientWidth || 1;
   const left = pct * width;
   cursorLine.style.left = left + 'px';
   cursorLine.style.display = 'block';
-  // auto-scroll to keep cursor near center
   const desired = Math.max(0, left - osmdCanvas.clientWidth/2);
   osmdCanvas.scrollLeft = desired;
-  // stop when finished
   if(pct >= 1){
     stopMusic();
   }
@@ -479,12 +503,11 @@ function updateCursorOnce(){
 
 /* ====== Reschedule from arbitrary time (for tempo changes/resume) ====== */
 function rescheduleFrom(sec){
-  // pause transport, dispose parts, build new parts, and start at sec
   try{ Tone.Transport.pause(); }catch(_){}
-  for(const p of toneParts){ try{ p.dispose(); }catch(_){ } }
+  for(const p of toneParts){ try{ p.dispose(); }catch(_){}
+  }
   toneParts = [];
-  scheduleToneParts(); // schedule with new tempo
-  // start transport at sec
+  scheduleToneParts();
   Tone.Transport.start(undefined, sec);
   log('再スケジュール: 再開時刻=' + sec.toFixed(2) + 's');
 }
@@ -495,17 +518,19 @@ osmdCanvas.addEventListener('click', (ev) => {
   const rect = osmdCanvas.getBoundingClientRect();
   const x = ev.clientX - rect.left + osmdCanvas.scrollLeft;
   const width = osmdCanvas.scrollWidth || osmdCanvas.clientWidth || 1;
-  const pct = x / width;
+  const pct = Math.max(0, Math.min(1, x / width));
   const tempoScale = parseInt(tempoPercent.value)/100;
   const effectiveTotal = totalDuration / tempoScale;
   const targetSec = Math.max(0, Math.min(effectiveTotal, pct * effectiveTotal));
-  // stop/schedule and start at targetSec
+
+  // restart playback at targetSec
   if(Tone.Transport.state === 'started' || Tone.Transport.state === 'paused'){
     stopMusic();
   }
   scheduleToneParts();
   Tone.Transport.start(undefined, targetSec);
   log(`クリック再生: ${targetSec.toFixed(2)}s（${(pct*100).toFixed(1)}%）`);
+  cursorLine.style.display = 'block';
 });
 
 /* ====== Utilities ====== */
@@ -515,7 +540,6 @@ function formatTime(s){
   const sec = Math.floor(s % 60);
   return `${m}:${sec < 10 ? '0' : ''}${sec}`;
 }
-
 </script>
 </body>
 </html>
