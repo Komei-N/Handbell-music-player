@@ -72,14 +72,14 @@ input[type=range]{width:100%}
 
 <script src="https://unpkg.com/opensheetmusicdisplay/build/opensheetmusicdisplay.min.js"></script>
 <script src="https://unpkg.com/tone/build/Tone.js"></script>
-
 <script>
-//曲リスト
+// 曲リスト
 const builtIn={
  "Song1":"music/song1.musicxml",
  "Song2":"music/song2.musicxml",
  "Song3":"music/song3.musicxml"
 };
+
 const songSelect=document.getElementById('songSelect');
 const partsContainer=document.getElementById('parts');
 const pitchesContainer=document.getElementById('pitches');
@@ -103,48 +103,45 @@ let totalDuration=0;
 let partNames=[];
 let pitchNames=[];
 let tonePart=null;
-let pauseTime=0;
 
-//初期化
 (async()=>{
  for(const k in builtIn){const opt=document.createElement('option');opt.value=k;opt.textContent=k;songSelect.appendChild(opt);}
  songSelect.addEventListener('change',()=>loadSong(songSelect.value));
  tempoPercent.addEventListener('input',()=>tempoLabel.textContent=tempoPercent.value+'%');
  volumeSlider.addEventListener('input',()=>{if(volumeNode)volumeNode.volume.value=parseInt(volumeSlider.value);});
  playBtn.addEventListener('click',playMusic);
- pauseBtn.addEventListener('click',pauseMusic);
+ pauseBtn.addEventListener('click',()=>Tone.Transport.pause());
  stopBtn.addEventListener('click',stopMusic);
 
- synth=new Tone.FMSynth({
-  harmonicity:8,modulationIndex:20,
-  oscillator:{type:'sine'},
-  envelope:{attack:0.001,decay:1.5,sustain:0,release:1.8},
-  modulation:{type:'sine'},
-  modulationEnvelope:{attack:0.001,decay:0.6,sustain:0,release:0.6}
-});
+ synth=new Tone.FMSynth({harmonicity:8,modulationIndex:20,oscillator:{type:'sine'},
+ envelope:{attack:0.001,decay:1.5,sustain:0,release:1.8},
+ modulation:{type:'sine'},
+ modulationEnvelope:{attack:0.001,decay:0.6,sustain:0,release:0.6}});
  volumeNode=new Tone.Volume(parseInt(volumeSlider.value)).toDestination();
  synth.connect(volumeNode);
+
  loadSong(Object.keys(builtIn)[0]);
 })();
 
-//曲読み込み
 async function loadSong(name){
  const resp=await fetch(builtIn[name]);const xmlText=await resp.text();
  if(!osmd){
    osmd=new opensheetmusicdisplay.OpenSheetMusicDisplay(osmdCanvas,{drawingParameters:'compact',renderSingleHorizontalStaffline:true});
  }
  await osmd.load(xmlText);await osmd.render();
+
  const parsed=parseMusicXML(xmlText);
  parsedEvents=parsed.events;totalDuration=parsed.duration;
- //パート名強制3パート
- partNames=parsed.parts.length?parsed.parts.slice(0,3):["Part1","Part2","Part3"];
- pitchNames=parsed.pitchNames.length?parsed.pitchNames:["C4","D4","E4","F4","G4","A4","B4"];
+
+ // ここがポイント：空でも必ずUIが出る
+ partNames=(parsed.parts.length?parsed.parts:["Part1","Part2","Part3"]);
+ pitchNames=(parsed.pitchNames.length?parsed.pitchNames:["C3","D3","E3","F3","G3","A3","B3","C4"]);
+
  renderPartUI();renderPitchUI();
  durationLabel.textContent=formatTime(totalDuration);
  cursorLine.style.height=osmdCanvas.clientHeight+'px';
 }
 
-//MusicXMLパース
 function parseMusicXML(xmlText){
  const parser=new DOMParser();const xml=parser.parseFromString(xmlText,'application/xml');
  const partNodes=[...xml.querySelectorAll('part')];
@@ -178,7 +175,6 @@ function parseMusicXML(xmlText){
 }
 function pitchToMidi(step,oct,alter){const map={C:0,D:2,E:4,F:5,G:7,A:9,B:11};return (oct+1)*12+(map[step.toUpperCase()]||0)+alter;}
 
-//UI生成
 function renderPartUI(){
  partsContainer.innerHTML='';
  partNames.forEach((p,i)=>{
@@ -196,7 +192,6 @@ function renderPitchUI(){
  });
 }
 
-//再生
 function playMusic(){
  if(!parsedEvents.length)return;
  const selectedParts=[...partsContainer.querySelectorAll('input')].map((i,idx)=>i.checked?idx:null).filter(i=>i!==null);
@@ -210,10 +205,7 @@ function playMusic(){
  tonePart.start(0);Tone.Transport.start();
  Tone.Transport.scheduleRepeat(updateCursor,0.05);
 }
-function pauseMusic(){Tone.Transport.pause();}
 function stopMusic(){if(tonePart)tonePart.dispose();Tone.Transport.stop();progressBar.style.width='0%';}
-
-//カーソル更新
 function updateCursor(){
  const sec=Tone.Transport.seconds;
  const percent=Math.min(sec/totalDuration*100,100);
