@@ -1,849 +1,228 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Handbell MusicXML Player (single file)</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Handbell MusicXML Player</title>
 <style>
-  body { margin:0; font-family: Arial, Helvetica, sans-serif; background:#fff; color:#000; }
-  .app { max-width:1200px; margin:12px auto; padding:12px; }
-  header { display:flex; align-items:center; gap:12px; }
-  h1 { margin:0; font-size:18px; }
-  .row { display:flex; gap:12px; flex-wrap:wrap; }
-  .left { width:360px; }
-  .panel { padding:12px; border:1px solid #ccc; border-radius:6px; margin-top:12px; background:#fafafa; }
-  .scoreContainer { position:relative; overflow:hidden; border:1px solid #ccc; border-radius:6px; height:440px; }
-  #osmdCanvas { overflow-x:auto; white-space:nowrap; height:100%; position:relative; }
-  .cursorLine { position:absolute; top:0; width:3px; background:#d33; z-index:50; display:none; transform:translateX(-1.5px); }
-  label { display:block; margin-bottom:6px; font-size:13px; }
-  input[type=range] { width:100%; }
-  .partList label, .pitchList label { display:block; margin-bottom:4px; cursor:pointer; }
-  .controls button { margin-right:6px; padding:6px 8px; }
-  .progress { height:8px; background:#eee; border-radius:4px; overflow:hidden; margin-top:8px; }
-  .bar { height:100%; width:0%; background:linear-gradient(90deg,#ff7a7a,#ffd7d7); }
-  #log { height:120px; overflow:auto; background:#fff; border:1px solid #eee; padding:8px; font-size:12px; }
-  .small { font-size:12px; color:#444; }
-  .noteClickable { cursor:pointer; }
+body{margin:0;font-family:sans-serif}
+.app{max-width:1200px;margin:10px auto;padding:12px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+.left{width:360px}
+.panel{padding:12px;border:1px solid #ccc;border-radius:6px;margin-top:12px}
+.scoreContainer{position:relative;overflow:hidden;border:1px solid #ccc;border-radius:6px;height:400px}
+#osmdCanvas{overflow-x:auto;white-space:nowrap;height:100%}
+.cursorLine{position:absolute;top:0;width:3px;background:red;z-index:10;display:none}
+label{display:block;margin-bottom:6px;font-size:13px}
+input[type=range]{width:100%}
+.partList label,.pitchList label{display:block;margin-bottom:4px;cursor:pointer}
+.controls button{margin-right:6px}
+.progress{height:8px;background:#eee;border-radius:4px;overflow:hidden;margin-top:6px}
+.bar{height:100%;width:0;background:red}
 </style>
 </head>
 <body>
 <div class="app">
-  <header><h1>Handbell MusicXML Player</h1></header>
+<header><h1>Handbell MusicXML Player</h1></header>
+<div class="row">
+<div class="left panel">
+  <label>曲の選択</label>
+  <select id="songSelect"></select>
 
-  <div class="row">
-    <div class="left panel">
-      <div>
-        <label>曲の選択</label>
-        <select id="songSelect"></select>
-        <button id="reloadBtn" style="margin-top:8px;">再読み込み</button>
-      </div>
+  <div style="margin-top:12px">
+    <label>演奏するパート</label>
+    <div id="parts" class="partList"></div>
+  </div>
 
-      <div style="margin-top:12px">
-        <label>演奏するパート（最大3）</label>
-        <div id="parts" class="partList"></div>
-      </div>
+  <div style="margin-top:12px">
+    <label>演奏する音程</label>
+    <div id="pitches" class="pitchList"></div>
+  </div>
 
-      <div style="margin-top:12px">
-        <label>演奏する音程（フィルタ）</label>
-        <div id="pitches" class="pitchList"></div>
-      </div>
+  <div style="margin-top:12px">
+    <label>テンポ (%)</label>
+    <input type="range" id="tempoPercent" min="20" max="300" value="100">
+    <span id="tempoLabel">100%</span>
+  </div>
 
-      <div style="margin-top:12px">
-        <label>テンポ（倍率 %）</label>
-        <input type="range" id="tempoPercent" min="20" max="300" value="100">
-        <div class="small">現在: <span id="tempoLabel">100%</span></div>
-      </div>
+  <div style="margin-top:12px">
+    <label>音量 (dB)</label>
+    <input type="range" id="volume" min="-24" max="6" value="-6">
+  </div>
 
-      <div style="margin-top:12px">
-        <label>音量 (dB)</label>
-        <input type="range" id="volume" min="-24" max="6" value="-6">
-      </div>
+  <div class="controls" style="margin-top:12px">
+    <button id="playBtn">再生</button>
+    <button id="pauseBtn">一時停止</button>
+    <button id="stopBtn">停止</button>
+  </div>
 
-      <div class="controls" style="margin-top:12px">
-        <button id="playBtn">再生</button>
-        <button id="pauseBtn">一時停止</button>
-        <button id="stopBtn">停止</button>
-      </div>
-
-      <div class="progress"><div class="bar" id="progressBar"></div></div>
-      <div style="display:flex; justify-content:space-between; margin-top:6px;">
-        <div class="small"><span id="timeLabel">0:00</span></div>
-        <div class="small"><span id="durationLabel">0:00</span></div>
-      </div>
-
-      <div style="margin-top:10px">
-        <div class="small">ログ / デバッグ：</div>
-        <pre id="log"></pre>
-      </div>
-    </div>
-
-    <div style="flex:1">
-      <div class="panel scoreContainer">
-        <div id="osmdCanvas"></div>
-        <div class="cursorLine" id="cursorLine"></div>
-      </div>
-    </div>
+  <div class="progress"><div class="bar" id="progressBar"></div></div>
+  <div style="display:flex;justify-content:space-between;font-size:12px">
+    <span id="timeLabel">0:00</span><span id="durationLabel">0:00</span>
   </div>
 </div>
+<div style="flex:1">
+  <div class="panel scoreContainer">
+    <div id="osmdCanvas"></div>
+    <div class="cursorLine" id="cursorLine"></div>
+  </div>
+</div>
+</div>
+</div>
 
-<!-- ライブラリ -->
 <script src="https://unpkg.com/opensheetmusicdisplay/build/opensheetmusicdisplay.min.js"></script>
 <script src="https://unpkg.com/tone/build/Tone.js"></script>
-<script src="https://unpkg.com/@tonejs/midi/build/Midi.js"></script>
 
 <script>
-/* ============================
-   Configuration: 3 built-in songs
-   ファイルはプロジェクト内の /music/ 以下に置いてください
-     /music/song1.musicxml
-     /music/song2.musicxml
-     /music/song3.musicxml
-   ============================ */
-const builtIn = {
-  "Song 1":"music/song1.musicxml",
-  "Song 2":"music/song2.musicxml",
-  "Song 3":"music/song3.musicxml"
+//曲リスト
+const builtIn={
+ "Song1":"music/song1.musicxml",
+ "Song2":"music/song2.musicxml",
+ "Song3":"music/song3.musicxml"
 };
+const songSelect=document.getElementById('songSelect');
+const partsContainer=document.getElementById('parts');
+const pitchesContainer=document.getElementById('pitches');
+const tempoPercent=document.getElementById('tempoPercent');
+const tempoLabel=document.getElementById('tempoLabel');
+const volumeSlider=document.getElementById('volume');
+const playBtn=document.getElementById('playBtn');
+const pauseBtn=document.getElementById('pauseBtn');
+const stopBtn=document.getElementById('stopBtn');
+const progressBar=document.getElementById('progressBar');
+const timeLabel=document.getElementById('timeLabel');
+const durationLabel=document.getElementById('durationLabel');
+const cursorLine=document.getElementById('cursorLine');
+const osmdCanvas=document.getElementById('osmdCanvas');
 
-/* ====== DOM elements ====== */
-const songSelect = document.getElementById('songSelect');
-const reloadBtn = document.getElementById('reloadBtn');
-const partsContainer = document.getElementById('parts');
-const pitchesContainer = document.getElementById('pitches');
-const tempoPercent = document.getElementById('tempoPercent');
-const tempoLabel = document.getElementById('tempoLabel');
-const volumeSlider = document.getElementById('volume');
-const playBtn = document.getElementById('playBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-const stopBtn = document.getElementById('stopBtn');
-const progressBar = document.getElementById('progressBar');
-const timeLabel = document.getElementById('timeLabel');
-const durationLabel = document.getElementById('durationLabel');
-const cursorLine = document.getElementById('cursorLine');
-const osmdCanvas = document.getElementById('osmdCanvas');
-const logEl = document.getElementById('log');
+let osmd=null;
+let synth=null;
+let volumeNode=null;
+let parsedEvents=[];
+let totalDuration=0;
+let partNames=[];
+let pitchNames=[];
+let tonePart=null;
+let pauseTime=0;
 
-/* ====== Player state ====== */
-let osmd = null;
-let synth = null;         // single synth used by all events
-let volumeNode = null;
-let baseEvents = [];      // events computed from MusicXML & OSMD mapping:
-                         // {time, duration, midi, pitchName, partIndex, measureNumber, gNoteRef, xPx}
-let totalDuration = 0;    // seconds at original tempo (base timeline)
-let partNames = [];
-let pitchNames = [];
-let tonePart = null;      // single Tone.Part (we schedule all notes in it)
-let lastTempoPercent = parseInt(tempoPercent.value);
-let updateSchedulerId = null;
-let isRendering = false;
+//初期化
+(async()=>{
+ for(const k in builtIn){const opt=document.createElement('option');opt.value=k;opt.textContent=k;songSelect.appendChild(opt);}
+ songSelect.addEventListener('change',()=>loadSong(songSelect.value));
+ tempoPercent.addEventListener('input',()=>tempoLabel.textContent=tempoPercent.value+'%');
+ volumeSlider.addEventListener('input',()=>{if(volumeNode)volumeNode.volume.value=parseInt(volumeSlider.value);});
+ playBtn.addEventListener('click',playMusic);
+ pauseBtn.addEventListener('click',pauseMusic);
+ stopBtn.addEventListener('click',stopMusic);
 
-/* ====== Initialize UI and libraries ====== */
-(function init(){
-  // populate song select
-  for(const k of Object.keys(builtIn)){
-    const opt = document.createElement('option'); opt.value = k; opt.textContent = k; songSelect.appendChild(opt);
-  }
-  songSelect.value = Object.keys(builtIn)[0];
-
-  // events
-  songSelect.addEventListener('change', ()=> loadSong(songSelect.value));
-  reloadBtn.addEventListener('click', ()=> loadSong(songSelect.value));
-  tempoPercent.addEventListener('input', ()=>{
-    tempoLabel.textContent = tempoPercent.value + '%';
-    // if playing, reschedule and preserve base logical time
-    if(Tone.Transport.state === 'started'){
-      rescheduleKeepingBaseTime();
-    }
-  });
-  volumeSlider.addEventListener('input', ()=> {
-    if(volumeNode) volumeNode.volume.value = parseInt(volumeSlider.value);
-  });
-
-  playBtn.addEventListener('click', playMusic);
-  pauseBtn.addEventListener('click', pauseMusic);
-  stopBtn.addEventListener('click', stopMusic);
-
-  // create synth + volume
-  synth = new Tone.FMSynth({
-    harmonicity: 8,
-    modulationIndex: 20,
-    oscillator: { type: 'sine' },
-    envelope: { attack: 0.001, decay: 1.5, sustain: 0.0, release: 1.8 },
-    modulation: { type: 'sine' },
-    modulationEnvelope: { attack:0.001, decay:0.6, sustain:0.0, release:0.6 }
-  });
-  volumeNode = new Tone.Volume(parseInt(volumeSlider.value)).toDestination();
-  synth.connect(volumeNode);
-
-  // responsive recompute positions on resize (important)
-  window.addEventListener('resize', () => {
-    try { computeGraphicalPositions(); } catch(e){ console.warn('resize compute fail',e); }
-  });
-
-  // initial load
-  loadSong(songSelect.value);
+ synth=new Tone.FMSynth({
+  harmonicity:8,modulationIndex:20,
+  oscillator:{type:'sine'},
+  envelope:{attack:0.001,decay:1.5,sustain:0,release:1.8},
+  modulation:{type:'sine'},
+  modulationEnvelope:{attack:0.001,decay:0.6,sustain:0,release:0.6}
+});
+ volumeNode=new Tone.Volume(parseInt(volumeSlider.value)).toDestination();
+ synth.connect(volumeNode);
+ loadSong(Object.keys(builtIn)[0]);
 })();
 
-/* ====== Utility logging ====== */
-function log(msg){
-  const t = new Date().toLocaleTimeString();
-  logEl.textContent += `[${t}] ${msg}\n`;
-  logEl.scrollTop = logEl.scrollHeight;
-  console.log(msg);
-}
-
-/* ====== Load and render score ====== */
+//曲読み込み
 async function loadSong(name){
-  const url = builtIn[name];
-  log(`曲読み込み: ${name} -> ${url}`);
-  // fetch xml text for parsing
-  let xmlText;
-  try{
-    const r = await fetch(url, {cache: "no-store"});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    xmlText = await r.text();
-  }catch(e){
-    log(`ファイル読み込みエラー: ${e.message}`);
-    alert(`曲ファイル ${url} を読み込めませんでした。ブラウザコンソールを確認してください。`);
-    return;
-  }
-
-  // initialize OSMD if needed
-  if(!osmd){
-    osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay(osmdCanvas, {
-      drawingParameters: 'compact',
-      autoResize: true,
-      // try to render horizontally as much as possible:
-      pageFormat: { width: 3000, height: 400 }
-      // Note: more options (like EngravingRules.RenderSingleHorizontalStaffline) could be tuned per OSMD version.
-    });
-  }
-
-  // Try load by URL first (some OSMD builds expect URL)
-  try{
-    isRendering = true;
-    await osmd.load(url);
-    await osmd.render();
-    log('OSMD: 描画完了 (load url)');
-    isRendering = false;
-  }catch(e){
-    log('OSMD load(url)失敗、xmlTextでloadを試みます: ' + e.message);
-    try{
-      await osmd.load(xmlText);
-      await osmd.render();
-      log('OSMD: XML文字列から描画完了（フォールバック）');
-      isRendering = false;
-    }catch(e2){
-      console.error(e2);
-      alert('楽譜の描画に失敗しました（詳細はコンソール）。');
-      log('OSMD描画フォールバック失敗: ' + e2.message);
-      isRendering = false;
-      return;
-    }
-  }
-
-  // parse MusicXML (DOM) to get accurate musical timing (tempo changes, divisions, measure numbers)
-  const parsed = parseMusicXML(xmlText);
-  // parsed.events: {time, duration, midi, pitchName, partIndex, measure}
-  baseEvents = parsed.events;
-  totalDuration = parsed.duration;
-  partNames = parsed.parts.slice(0,3);
-  pitchNames = Array.from(new Set(baseEvents.map(e => e.pitchName))).sort((a,b)=>a.localeCompare(b));
-
-  // Render part/pitch UI
-  renderPartUI();
-  renderPitchUI();
-
-  durationLabel.textContent = formatTime(totalDuration);
-
-  // compute graphical positions (map events -> OSMD graphical notes)
-  try{
-    await computeGraphicalPositions();
-    log(`位置マッピング完了: mapped ${baseEvents.filter(e=>e.xPx!==undefined).length}/${baseEvents.length} notes`);
-  }catch(e){
-    console.warn('computeGraphicalPositions error', e);
-    log('注意: 楽譜描画後の位置マッピングに一部失敗しました（詳細はコンソール）。');
-  }
-
-  // Reset player state
-  stopMusic();
-  progressBar.style.width = '0%';
-  cursorLine.style.display = 'none';
+ const resp=await fetch(builtIn[name]);const xmlText=await resp.text();
+ if(!osmd){
+   osmd=new opensheetmusicdisplay.OpenSheetMusicDisplay(osmdCanvas,{drawingParameters:'compact',renderSingleHorizontalStaffline:true});
+ }
+ await osmd.load(xmlText);await osmd.render();
+ const parsed=parseMusicXML(xmlText);
+ parsedEvents=parsed.events;totalDuration=parsed.duration;
+ //パート名強制3パート
+ partNames=parsed.parts.length?parsed.parts.slice(0,3):["Part1","Part2","Part3"];
+ pitchNames=parsed.pitchNames.length?parsed.pitchNames:["C4","D4","E4","F4","G4","A4","B4"];
+ renderPartUI();renderPitchUI();
+ durationLabel.textContent=formatTime(totalDuration);
+ cursorLine.style.height=osmdCanvas.clientHeight+'px';
 }
 
-/* ====== MusicXML parser (robust) ======
-   returns { events: [...], parts: [...], duration: s }
-   events[].time/duration are seconds (taking <sound tempo=".."> into account)
-   each event also gets measure number.
-*/
+//MusicXMLパース
 function parseMusicXML(xmlText){
-  const parser = new DOMParser();
-  const xml = parser.parseFromString(xmlText,'application/xml');
-
-  // get parts / part-list
-  const scoreParts = Array.from(xml.querySelectorAll('score-part'));
-  const partList = scoreParts.length ? scoreParts.map(p => {
-    const pn = p.querySelector('part-name'); return pn ? pn.textContent.trim() : (p.getAttribute('id')||'Part');
-  }) : Array.from(xml.querySelectorAll('part')).map((_,i)=>`Part ${i+1}`);
-
-  const partNodes = Array.from(xml.querySelectorAll('part'));
-  let events = [];
-
-  partNodes.forEach((partNode, pi) => {
-    let divisions = 1;
-    let currentTempo = 120;
-    let timeSec = 0;
-    const measures = Array.from(partNode.querySelectorAll('measure'));
-    measures.forEach((measure, mi) => {
-      const measureNumber = parseInt(measure.getAttribute('number') || (mi+1));
-      // attributes
-      const attr = measure.querySelector('attributes');
-      if(attr){
-        const d = attr.querySelector('divisions'); if(d) divisions = parseFloat(d.textContent) || divisions;
-      }
-      // tempo change tags: <direction><sound tempo="..."/></direction> or <sound tempo="..."/>
-      const sound = measure.querySelector('direction > sound, sound');
-      if(sound && sound.getAttribute('tempo')){
-        const t = parseFloat(sound.getAttribute('tempo'));
-        if(!isNaN(t) && t > 0) currentTempo = t;
-      }
-      // notes
-      const notes = Array.from(measure.querySelectorAll('note'));
-      notes.forEach(note => {
-        // rest
-        if(note.querySelector('rest')){
-          const dur = parseFloat(note.querySelector('duration')?.textContent || '0');
-          if(!isNaN(dur)) timeSec += (dur/divisions) * (60/currentTempo);
-          return;
-        }
-        const step = note.querySelector('pitch > step')?.textContent || 'C';
-        const octave = parseInt(note.querySelector('pitch > octave')?.textContent || '4');
-        const alter = parseInt(note.querySelector('pitch > alter')?.textContent || '0');
-        const dur = parseFloat(note.querySelector('duration')?.textContent || '1');
-        const midi = pitchToMidi(step, octave, alter);
-        const secs = (dur/divisions) * (60/currentTempo);
-        const pitchName = step + octave;
-        events.push({ time: timeSec, duration: secs, midi, pitchName, partIndex: pi, measure: measureNumber });
-        timeSec += secs;
-      });
-    });
-  });
-
-  const duration = events.reduce((m,e)=>Math.max(m, e.time + e.duration), 0);
-  return { events, parts: partList, duration };
+ const parser=new DOMParser();const xml=parser.parseFromString(xmlText,'application/xml');
+ const partNodes=[...xml.querySelectorAll('part')];
+ const partList=[...xml.querySelectorAll('score-part')].map(p=>p.querySelector('part-name')?.textContent||p.getAttribute('id'));
+ let events=[],pitchSet=new Set();
+ partNodes.forEach((partNode,pi)=>{
+   let divisions=1,tempo=120,timeSec=0;
+   const measures=[...partNode.querySelectorAll('measure')];
+   measures.forEach(measure=>{
+     const attr=measure.querySelector('attributes');
+     if(attr){const d=attr.querySelector('divisions');if(d)divisions=parseFloat(d.textContent);}
+     const sound=measure.querySelector('direction > sound, sound');
+     if(sound&&sound.getAttribute('tempo'))tempo=parseFloat(sound.getAttribute('tempo'));
+     const notes=[...measure.querySelectorAll('note')];
+     notes.forEach(note=>{
+       const dur=parseFloat(note.querySelector('duration')?.textContent||0);
+       if(note.querySelector('rest')){timeSec+=dur/divisions*(60/tempo);return;}
+       const step=note.querySelector('pitch>step')?.textContent;
+       const octave=parseInt(note.querySelector('pitch>octave')?.textContent);
+       const alter=parseInt(note.querySelector('pitch>alter')?.textContent||0);
+       const midi=pitchToMidi(step,octave,alter);
+       const secs=dur/divisions*(60/tempo);
+       pitchSet.add(step+octave);
+       events.push({time:timeSec,duration:secs,midi,pitchName:step+octave,partIndex:pi});
+       timeSec+=secs;
+     });
+   });
+ });
+ const duration=events.reduce((m,e)=>Math.max(m,e.time+e.duration),0);
+ return {events,parts:partList,pitchNames:[...pitchSet],duration};
 }
-function pitchToMidi(step, oct, alter){
-  const map = { C:0,D:2,E:4,F:5,G:7,A:9,B:11 };
-  return (oct + 1) * 12 + (map[step.toUpperCase()] || 0) + (alter || 0);
-}
+function pitchToMidi(step,oct,alter){const map={C:0,D:2,E:4,F:5,G:7,A:9,B:11};return (oct+1)*12+(map[step.toUpperCase()]||0)+alter;}
 
-/* ====== UI render for parts & pitches ====== */
+//UI生成
 function renderPartUI(){
-  partsContainer.innerHTML = '';
-  if(partNames.length === 0){
-    partsContainer.textContent = '(パート情報無し)';
-    return;
-  }
-  partNames.forEach((pn, i) => {
-    const label = document.createElement('label');
-    label.innerHTML = `<input type="checkbox" checked data-index="${i}"> ${pn}`;
-    partsContainer.appendChild(label);
-    label.querySelector('input').addEventListener('change', () => {
-      applyVisibilityFilters(); // update OSMD visuals
-      // reschedule playback (keeps transport state)
-      rescheduleKeepingBaseTime();
-    });
-  });
+ partsContainer.innerHTML='';
+ partNames.forEach((p,i)=>{
+   const lab=document.createElement('label');
+   lab.innerHTML=`<input type="checkbox" checked data-index="${i}">${p}`;
+   partsContainer.appendChild(lab);
+ });
 }
 function renderPitchUI(){
-  pitchesContainer.innerHTML = '';
-  if(pitchNames.length === 0){
-    pitchesContainer.textContent = '(音程情報無し)';
-    return;
-  }
-  pitchNames.forEach(p => {
-    const label = document.createElement('label');
-    label.innerHTML = `<input type="checkbox" checked data-pitch="${p}"> ${p}`;
-    pitchesContainer.appendChild(label);
-    label.querySelector('input').addEventListener('change', () => {
-      applyVisibilityFilters();
-      rescheduleKeepingBaseTime();
-    });
-  });
+ pitchesContainer.innerHTML='';
+ pitchNames.forEach(p=>{
+   const lab=document.createElement('label');
+   lab.innerHTML=`<input type="checkbox" checked data-pitch="${p}">${p}`;
+   pitchesContainer.appendChild(lab);
+ });
 }
 
-/* ====== Apply visibility: hide graphically the notes for unselected parts/pitches ======
-   We try to use GraphicalNote.setVisible if available (recommended).
-   We iterate over baseEvents that have gNoteRef assigned and call setVisible(false/true).
-   If not available, we do a conservative DOM approach (set style on svg elements if present).
-*/
-function applyVisibilityFilters(){
-  const selectedParts = Array.from(partsContainer.querySelectorAll('input')).map(i => i.checked ? parseInt(i.getAttribute('data-index')) : null).filter(x => x !== null);
-  const selectedPitches = Array.from(pitchesContainer.querySelectorAll('input')).map(i => i.checked ? i.getAttribute('data-pitch') : null).filter(Boolean);
-
-  let anyGraphicalSet = false;
-  for(const ev of baseEvents){
-    if(!ev.gNoteRef) continue;
-    const visible = selectedParts.includes(ev.partIndex) && selectedPitches.includes(ev.pitchName);
-    try{
-      // preferred method: GraphicalNote.setVisible
-      if(typeof ev.gNoteRef.setVisible === 'function'){
-        ev.gNoteRef.setVisible(visible);
-        anyGraphicalSet = true;
-      } else {
-        // fallback: try to access DOM bounding element and toggle display
-        const svgEl = getGraphicalNoteSVGElement(ev.gNoteRef);
-        if(svgEl) svgEl.style.display = visible ? 'inline' : 'none';
-      }
-    }catch(e){
-      console.warn('applyVisibilityFilters: cannot set visible on gNoteRef', e);
-    }
-  }
-
-  if(!anyGraphicalSet){
-    log('注意: OSMD の GraphicalNote.setVisible が利用できません。楽譜の完全非表示ができない場合があります。');
-  } else {
-    log('楽譜表示更新（パート/ピッチの可視化）');
-  }
+//再生
+function playMusic(){
+ if(!parsedEvents.length)return;
+ const selectedParts=[...partsContainer.querySelectorAll('input')].map((i,idx)=>i.checked?idx:null).filter(i=>i!==null);
+ const selectedPitches=[...pitchesContainer.querySelectorAll('input')].map(i=>i.checked?i.getAttribute('data-pitch'):null).filter(Boolean);
+ if(!selectedParts.length||!selectedPitches.length){alert('パートまたはピッチが未選択です');return;}
+ if(tonePart)tonePart.dispose();
+ const tempo=parseInt(tempoPercent.value)/100;
+ tonePart=new Tone.Part((time,v)=>{synth.triggerAttackRelease(Tone.Frequency(v.midi,'midi'),v.duration/tempo,time);},
+ parsedEvents.filter(e=>selectedParts.includes(e.partIndex)&&selectedPitches.includes(e.pitchName))
+ .map(e=>({time:e.time/tempo,duration:e.duration/tempo,midi:e.midi})));
+ tonePart.start(0);Tone.Transport.start();
+ Tone.Transport.scheduleRepeat(updateCursor,0.05);
 }
+function pauseMusic(){Tone.Transport.pause();}
+function stopMusic(){if(tonePart)tonePart.dispose();Tone.Transport.stop();progressBar.style.width='0%';}
 
-/* ====== Build mapping from parsed music events -> OSMD graphical notes & compute pixel X positions ======
-   Strategy:
-    - Use osmd.drawer.graphicalMusicSheet.measureList to iterate GraphicalMeasure -> staffEntries -> graphicalVoiceEntries -> notes (GraphicalNote)
-    - For each GraphicalNote, attempt to derive pitch text and measure number
-    - Greedy match parsed events to GraphicalNotes by measureNumber + pitchName (first unmatched)
-    - Compute pixel X via GraphicalNote.PositionAndShape.AbsolutePosition -> svgToDom -> convert to container local coordinate
-    - If gNote mapping not found for an event, use measure center fallback
-*/
-async function computeGraphicalPositions(){
-  if(!osmd) throw new Error('OSMD not initialized');
-  // wait a tick to ensure DOM present
-  await new Promise(res => setTimeout(res, 20));
-
-  // find drawer & graphical music sheet
-  let gms = null;
-  try{
-    gms = osmd.drawer.graphicalMusicSheet;
-  }catch(e){
-    // fallback
-    log('警告: osmd.drawer.graphicalMusicSheet にアクセスできません（OSMDバージョン差）。別アプローチを試します。');
-    gms = (osmd.drawer && osmd.drawer.graphicalMusicSheet) ? osmd.drawer.graphicalMusicSheet : null;
-  }
-  if(!gms){
-    log('グラフィカル情報が取得できません。位置マッピングをスキップします。');
-    return;
-  }
-
-  // collect all graphical notes
-  const gNoteEntries = []; // {gNote, measureNumber, pitchName}
-  try{
-    const pages = gms.measureList || [];
-    for(const page of pages){
-      for(const gMeasure of page){
-        // measure number: GraphicalMeasure.MeasureNumber
-        const measureNumber = (typeof gMeasure.MeasureNumber === 'number') ? gMeasure.MeasureNumber : (gMeasure.parentSourceMeasure && gMeasure.parentSourceMeasure.MeasureNumber) ? gMeasure.parentSourceMeasure.MeasureNumber : undefined;
-        const staffEntries = gMeasure.staffEntries || [];
-        for(const staffEntry of staffEntries){
-          const gvEs = staffEntry.graphicalVoiceEntries || [];
-          for(const gve of gvEs){
-            const notes = gve.notes || [];
-            for(const gNote of notes){
-              // derive pitch text if possible
-              let pitchText = null;
-              try{
-                // GraphicalNote has get ToStringShort (getter) in some versions
-                if(gNote.ToStringShortGet) pitchText = gNote.ToStringShortGet;
-                else if(typeof gNote.getToStringShort === 'function') pitchText = gNote.getToStringShort();
-                else if(gNote.sourceNote && gNote.sourceNote.Pitch && gNote.sourceNote.Pitch.Step){
-                  pitchText = (gNote.sourceNote.Pitch.Step || '') + (gNote.sourceNote.Pitch.Octave || '');
-                } else if(gNote.sourceNote && gNote.sourceNote.halfTone !== undefined){
-                  // fallback: compute name from halfTone
-                  pitchText = midiToName((gNote.sourceNote.halfTone || 0) + 12); // heuristic
-                } else {
-                  // last resort: toString
-                  try { pitchText = String(gNote.toString()); } catch(_) { pitchText = null; }
-                }
-              }catch(e){
-                pitchText = null;
-              }
-              gNoteEntries.push({ gNote, measureNumber, pitchText });
-            }
-          }
-        }
-      }
-    }
-  }catch(e){
-    console.warn('gms traversal failed', e);
-    log('警告: グラフィカルノートの列挙に失敗しました：詳細はコンソール');
-  }
-
-  // greedy match parsed events to gNoteEntries
-  // mark all gNoteEntries as unmatched initially
-  const matched = new Array(gNoteEntries.length).fill(false);
-
-  // Sort baseEvents by time to keep stable mapping
-  baseEvents.sort((a,b)=>a.time - b.time);
-
-  for(const ev of baseEvents){
-    ev.gNoteRef = null;
-    ev.xPx = undefined;
-  }
-
-  for(let ei=0; ei<baseEvents.length; ei++){
-    const ev = baseEvents[ei];
-    // try find exact match: same measure and same pitchName
-    let foundIdx = -1;
-    for(let gi=0; gi<gNoteEntries.length; gi++){
-      if(matched[gi]) continue;
-      const g = gNoteEntries[gi];
-      if((g.measureNumber === ev.measure) && g.pitchText && (g.pitchText.indexOf(ev.pitchName) !== -1 || ev.pitchName.indexOf(g.pitchText) !== -1 || g.pitchText === ev.pitchName)){
-        foundIdx = gi; break;
-      }
-    }
-    // fallback: same measure only
-    if(foundIdx === -1){
-      for(let gi=0; gi<gNoteEntries.length; gi++){
-        if(matched[gi]) continue;
-        const g = gNoteEntries[gi];
-        if(g.measureNumber === ev.measure){
-          foundIdx = gi; break;
-        }
-      }
-    }
-    // final fallback: nearest by measure number
-    if(foundIdx === -1){
-      let best = -1; let bestDiff = 1e9;
-      for(let gi=0; gi<gNoteEntries.length; gi++){
-        if(matched[gi]) continue;
-        const g = gNoteEntries[gi];
-        const mn = (typeof g.measureNumber==='number') ? g.measureNumber : Infinity;
-        const diff = Math.abs((mn || 0) - (ev.measure || 0));
-        if(diff < bestDiff){ bestDiff = diff; best = gi; }
-      }
-      foundIdx = best;
-    }
-
-    if(foundIdx >= 0){
-      matched[foundIdx] = true;
-      const gEntry = gNoteEntries[foundIdx];
-      ev.gNoteRef = gEntry.gNote;
-      // compute pixel X using GraphicalNote.PositionAndShape.AbsolutePosition -> svgToDom
-      try{
-        const pos = (gEntry.gNote && gEntry.gNote.PositionAndShape && gEntry.gNote.PositionAndShape.AbsolutePosition) ? gEntry.gNote.PositionAndShape.AbsolutePosition : null;
-        let domPt = null;
-        if(pos && typeof gms.svgToDom === 'function'){
-          // pos likely has .x/.y values in OSMD internal units
-          try{
-            domPt = gms.svgToDom({ x: pos.x || pos.X || pos[0] || 0, y: pos.y || pos.Y || pos[1] || 0 });
-          }catch(e){
-            // sometimes different property names
-            domPt = gms.svgToDom(pos);
-          }
-        }
-        // fallback: try to locate SVG element and use getBoundingClientRect
-        if(!domPt){
-          const svgEl = getGraphicalNoteSVGElement(gEntry.gNote);
-          if(svgEl){
-            const rect = svgEl.getBoundingClientRect();
-            const containerRect = osmdCanvas.getBoundingClientRect();
-            ev.xPx = rect.left - containerRect.left + rect.width/2 + osmdCanvas.scrollLeft;
-          } else {
-            // fallback to measure center
-            ev.xPx = fallbackMeasureCenterX(ev.measure) || 0;
-          }
-        }else{
-          const containerRect = osmdCanvas.getBoundingClientRect();
-          ev.xPx = domPt.x - containerRect.left + osmdCanvas.scrollLeft;
-        }
-      }catch(e){
-        console.warn('compute x failed for event', ev, e);
-        ev.xPx = fallbackMeasureCenterX(ev.measure) || 0;
-      }
-    }else{
-      // no match
-      ev.gNoteRef = null;
-      ev.xPx = fallbackMeasureCenterX(ev.measure) || 0;
-    }
-  }
-
-  // final: if any xPx undefined -> set measure fallback
-  for(const ev of baseEvents){
-    if(ev.xPx === undefined || isNaN(ev.xPx)) ev.xPx = fallbackMeasureCenterX(ev.measure) || 0;
-  }
-
-  // Done; baseEvents updated in-place
-  return;
+//カーソル更新
+function updateCursor(){
+ const sec=Tone.Transport.seconds;
+ const percent=Math.min(sec/totalDuration*100,100);
+ progressBar.style.width=percent+'%';timeLabel.textContent=formatTime(sec);
+ const width=osmdCanvas.scrollWidth;
+ cursorLine.style.display='block';cursorLine.style.left=percent/100*width+'px';
+ osmdCanvas.scrollLeft=Math.max(0,cursorLine.offsetLeft-osmdCanvas.clientWidth/2);
 }
-
-/* ====== Helpers for computeGraphicalPositions ====== */
-
-// attempt to find DOM/SVG element for a GraphicalNote object (best-effort)
-function getGraphicalNoteSVGElement(gNote){
-  if(!gNote) return null;
-  // Try several approaches:
-  try{
-    // 1) If GraphicalNote has parent Music Page with SVG element and a 'ToStringShort' id, try to search by text (slow)
-    if(gNote.ParentMusicPage && gNote.ParentMusicPage.SVGElements){
-      // Not standardized; skip
-    }
-    // 2) If GraphicalNote exposes vfnote (VexFlow note), try to access vfnote.getModifierContext() etc and find DOM node - but this is fragile.
-    if(gNote.vfnote && gNote.vfnote.getAttributes && typeof gNote.vfnote.getAttributes === 'function'){
-      // sometimes VexFlow stavenote attaches a domRef or id
-      const attr = gNote.vfnote.getAttributes();
-      if(attr && attr.id){
-        const el = document.getElementById(attr.id);
-        if(el) return el;
-      }
-    }
-    // 3) look for svg elements with class containing 'vf-note' etc (last resort, approximate)
-    const svg = osmdCanvas.querySelector('svg');
-    if(svg){
-      const candidates = svg.querySelectorAll('g, path, ellipse, circle');
-      // We cannot reliably match; return null to let bounding box fallback use measure center.
-    }
-  }catch(e){ /* ignore */ }
-  return null;
-}
-
-// fallback: compute approximate measure center X in pixels (if precise note not found)
-// uses graphicalMusicSheet measureList positions
-function fallbackMeasureCenterX(measureNumber){
-  try{
-    const gms = osmd.drawer.graphicalMusicSheet;
-    if(!gms) return 0;
-    const pages = gms.measureList || [];
-    for(const page of pages){
-      for(const gMeasure of page){
-        const mn = (typeof gMeasure.MeasureNumber === 'number') ? gMeasure.MeasureNumber : (gMeasure.parentSourceMeasure && gMeasure.parentSourceMeasure.MeasureNumber) ? gMeasure.parentSourceMeasure.MeasureNumber : undefined;
-        if(mn === measureNumber){
-          // use measure.PositionAndShape.AbsolutePosition.x plus half its width
-          const pos = gMeasure.PositionAndShape && gMeasure.PositionAndShape.AbsolutePosition ? gMeasure.PositionAndShape.AbsolutePosition : null;
-          const width = gMeasure.PositionAndShape && gMeasure.PositionAndShape.Size ? (gMeasure.PositionAndShape.Size.x || gMeasure.PositionAndShape.Size.width || 0) : (gMeasure.PositionAndShape && gMeasure.PositionAndShape.AbsolutePosition && gMeasure.PositionAndShape.AbsolutePosition.width ? gMeasure.PositionAndShape.AbsolutePosition.width : 0);
-          if(pos && typeof gms.svgToDom === 'function'){
-            try{
-              const domPt = gms.svgToDom({ x: pos.x + (width/2 || 0), y: pos.y || 0 });
-              const containerRect = osmdCanvas.getBoundingClientRect();
-              return domPt.x - containerRect.left + osmdCanvas.scrollLeft;
-            }catch(e){
-              // fallback to using container left plus rough fraction
-              const svg = osmdCanvas.querySelector('svg');
-              if(svg){
-                return Math.min(svg.clientWidth - 10, (gMeasure.PositionAndShape.RelativePosition.x||0));
-              }
-            }
-          }
-        }
-      }
-    }
-  }catch(e){ /* ignore */ }
-  return 0;
-}
-
-/* ====== Scheduling & playback ====== */
-
-// Build Tone.Part from baseEvents, applying filters and tempo scale
-function scheduleTonePartFromBase(){
-  // clear previous
-  try{ if(tonePart) { tonePart.dispose(); tonePart = null; } } catch(e){}
-  Tone.Transport.cancel(); // remove scheduled callbacks (cursor updater will be rescheduled)
-  const selectedParts = Array.from(partsContainer.querySelectorAll('input')).map(i => i.checked ? parseInt(i.getAttribute('data-index')) : null).filter(x => x !== null);
-  const selectedPitches = Array.from(pitchesContainer.querySelectorAll('input')).map(i => i.checked ? i.getAttribute('data-pitch') : null).filter(Boolean);
-  if(selectedParts.length === 0 || selectedPitches.length === 0){
-    log('再生対象がなくなりました（パートまたはピッチが未選択）。');
-    // still update duration display
-    const tempoScale = parseInt(tempoPercent.value)/100;
-    const effectiveTotal = totalDuration / tempoScale;
-    durationLabel.textContent = formatTime(effectiveTotal);
-    return;
-  }
-
-  const tempoScale = parseInt(tempoPercent.value)/100;
-  // prepare events filtered
-  const playEvents = baseEvents
-    .filter(e => selectedParts.includes(e.partIndex) && selectedPitches.includes(e.pitchName))
-    .map(e => ({ time: e.time / tempoScale, duration: e.duration / tempoScale, midi: e.midi }));
-
-  if(playEvents.length === 0){
-    log('フィルタの結果、演奏イベントがありません。');
-    const effectiveTotal = totalDuration / tempoScale;
-    durationLabel.textContent = formatTime(effectiveTotal);
-    return;
-  }
-
-  // create Tone.Part (single)
-  tonePart = new Tone.Part((time, ev) => {
-    synth.triggerAttackRelease(Tone.Frequency(ev.midi, 'midi'), ev.duration, time);
-  }, playEvents);
-  tonePart.start(0);
-
-  // schedule cursor updater regularly
-  Tone.Transport.scheduleRepeat( ()=> {
-    // use our per-frame update function directly
-    updateCursorPosition();
-  }, 0.03);
-
-  const effectiveTotal = totalDuration / tempoScale;
-  durationLabel.textContent = formatTime(effectiveTotal);
-  log(`スケジュール完了: ${playEvents.length} イベント, 有効時間: ${formatTime(effectiveTotal)}`);
-}
-
-/* ====== Playback control ====== */
-async function playMusic(){
-  await Tone.start();
-  // build schedule if not present
-  if(!tonePart){
-    scheduleTonePartFromBase();
-  }
-  // if schedule produced nothing, skip
-  if(!tonePart) { log('再生できるイベントがありません。'); return; }
-
-  // If transport is paused or stopped, start/resume
-  if(Tone.Transport.state !== 'started'){
-    Tone.Transport.start();
-    log('再生開始');
-  } else {
-    log('既に再生中です');
-  }
-  cursorLine.style.display = 'block';
-}
-function pauseMusic(){
-  if(Tone.Transport.state === 'started'){
-    Tone.Transport.pause();
-    log('一時停止');
-  }
-}
-function stopMusic(){
-  if(Tone.Transport.state !== 'stopped'){
-    Tone.Transport.stop();
-  }
-  // dispose scheduled Tone.Part
-  try{ if(tonePart) tonePart.dispose(); tonePart = null; }catch(e){}
-  // cancel cursor update
-  Tone.Transport.cancel();
-  progressBar.style.width = '0%';
-  timeLabel.textContent = '0:00';
-  cursorLine.style.display = 'none';
-  log('停止');
-}
-
-/* ====== Reschedule helpers (when tempo or filters change) ====== */
-function rescheduleKeepingBaseTime(){
-  // If transport is running or paused, map current scheduled time back to baseTime, then rebuild schedule and restart at appropriate scheduled time.
-  const oldTempoScale = lastTempoPercent/100;
-  const newTempoPercent = parseInt(tempoPercent.value);
-  const newTempoScale = newTempoPercent/100;
-  lastTempoPercent = newTempoPercent;
-
-  // compute baseTime from current transport seconds & oldTempoScale
-  const curScheduled = Tone.Transport.seconds; // seconds in scheduled (scaled) timeline
-  const baseTime = curScheduled * oldTempoScale;
-
-  // rebuild schedule (dispose prior)
-  try{ if(tonePart) { tonePart.dispose(); tonePart = null; } }catch(e){}
-  Tone.Transport.cancel();
-
-  // schedule with new tempo
-  scheduleTonePartFromBase();
-
-  // start transport at scheduled new time
-  const newScheduledTime = baseTime / newTempoScale;
-  if(Tone.Transport.state === 'started'){
-    // start at newScheduledTime
-    Tone.Transport.start(undefined, newScheduledTime);
-  } else if(Tone.Transport.state === 'paused'){
-    // leave paused, but set transport position (Transport.start will be required to resume)
-    // Tone.Transport.seconds setter is not always available; instead start then pause immediately to set position
-    Tone.Transport.start(undefined, newScheduledTime);
-    Tone.Transport.pause();
-  }
-  log(`再スケジュール: baseTime ${baseTime.toFixed(3)}s -> newScheduled ${newScheduledTime.toFixed(3)}s (tempo ${newTempoPercent}%)`);
-}
-
-/* ====== Cursor update ====== */
-function updateCursorPosition(){
-  // tempoScale (current)
-  const tempoScale = parseInt(tempoPercent.value)/100;
-  const effectiveTotal = totalDuration / (tempoScale || 1);
-  // scheduled seconds elapsed
-  const scheduledSec = Tone.Transport.seconds || 0;
-  const baseTime = scheduledSec * tempoScale;
-  // progress
-  const pct = effectiveTotal > 0 ? Math.min(1, scheduledSec / effectiveTotal) : 0;
-  progressBar.style.width = (pct * 100) + '%';
-  timeLabel.textContent = formatTime(baseTime);
-
-  // find nearest event (we use the next event that starts >= baseTime, or current playing if inside note)
-  let bestEv = null;
-  // priority: event where baseTime in [time, time+duration)
-  for(const e of baseEvents){
-    if(baseTime >= e.time - 1e-8 && baseTime < e.time + e.duration - 1e-8){
-      bestEv = e; break;
-    }
-  }
-  if(!bestEv){
-    // try next event after baseTime
-    for(const e of baseEvents){
-      if(e.time >= baseTime - 1e-8){ bestEv = e; break; }
-    }
-  }
-  if(!bestEv && baseEvents.length) bestEv = baseEvents[baseEvents.length-1];
-
-  if(bestEv){
-    // set cursor x at bestEv.xPx
-    const left = (typeof bestEv.xPx === 'number') ? bestEv.xPx : 0;
-    cursorLine.style.left = left + 'px';
-    cursorLine.style.display = 'block';
-    // auto-scroll to keep cursor near center
-    const desired = Math.max(0, left - osmdCanvas.clientWidth/2);
-    osmdCanvas.scrollLeft = desired;
-  }
-
-  if(pct >= 1){
-    // reached end
-    stopMusic();
-  }
-}
-
-/* ====== Click-to-jump on score ====== */
-osmdCanvas.addEventListener('click', (ev) => {
-  // compute x relative to content
-  const rect = osmdCanvas.getBoundingClientRect();
-  const x = ev.clientX - rect.left + osmdCanvas.scrollLeft;
-  // find nearest event by xPx
-  if(!baseEvents || baseEvents.length === 0) return;
-  let best = null; let bestDist = Infinity;
-  for(const e of baseEvents){
-    if(typeof e.xPx !== 'number') continue;
-    const d = Math.abs(e.xPx - x);
-    if(d < bestDist){ bestDist = d; best = e; }
-  }
-  if(!best) return;
-  // baseTime target
-  const targetBase = best.time;
-  const tempoScale = parseInt(tempoPercent.value)/100;
-  const targetScheduled = targetBase / tempoScale;
-
-  // reschedule and start at targetScheduled
-  try{ if(tonePart) tonePart.dispose(); tonePart = null; }catch(e){}
-  Tone.Transport.cancel();
-  scheduleTonePartFromBase();
-  Tone.Transport.start(undefined, targetScheduled);
-  cursorLine.style.display = 'block';
-  log(`クリック再生: measure ${best.measure}, time ${targetBase.toFixed(3)}s -> scheduled ${targetScheduled.toFixed(3)}s`);
-});
-
-/* ====== Utilities ====== */
-function formatTime(s){
-  if(!isFinite(s) || s <= 0) return '0:00';
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec < 10 ? '0' : ''}${sec}`;
-}
-function midiToName(m){
-  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-  const oct = Math.floor(m/12)-1;
-  return names[m%12] + oct;
-}
+function formatTime(s){const m=Math.floor(s/60);const sec=Math.floor(s%60);return m+':' + (sec<10?'0'+sec:sec);}
 </script>
 </body>
 </html>
