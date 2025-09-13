@@ -1,110 +1,318 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Handbell Player Base</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Handbell MusicXML Player</title>
 <style>
-body {margin:0;font-family:sans-serif;}
-.app {max-width:1200px;margin:0 auto;padding:12px;}
-header {margin-bottom:12px;}
-#score {border:1px solid #ccc;height:400px;overflow:auto;position:relative;}
-#cursor {position:absolute;top:0;width:3px;background:red;height:100%;display:none;}
+body { margin:0; font-family: Arial, Helvetica, sans-serif; background:#fff; color:#000; }
+.app { max-width:1200px; margin:12px auto; padding:12px; }
+header { display:flex; align-items:center; gap:12px; }
+h1 { margin:0; font-size:18px; }
+.row { display:flex; gap:12px; flex-wrap:wrap; }
+.left { width:360px; }
+.panel { padding:12px; border:1px solid #ccc; border-radius:6px; margin-top:12px; background:#fafafa; }
+.scoreContainer { position:relative; overflow:hidden; border:1px solid #ccc; border-radius:6px; height:440px; }
+#osmdCanvas { overflow-x:auto; white-space:nowrap; height:100%; }
+.cursorLine { position:absolute; top:0; width:3px; background:#d33; z-index:50; display:none; }
+label { display:block; margin-bottom:6px; font-size:13px; }
+input[type=range] { width:100%; }
+.partList label, .pitchList label { display:block; margin-bottom:4px; cursor:pointer; }
+.controls button { margin-right:6px; padding:6px 8px; }
+.progress { height:8px; background:#eee; border-radius:4px; overflow:hidden; margin-top:8px; }
+.bar { height:100%; width:0%; background:linear-gradient(90deg,#ff7a7a,#ffd7d7); }
+#log { height:120px; overflow:auto; background:#fff; border:1px solid #eee; padding:8px; font-size:12px; }
+.small { font-size:12px; color:#444; }
 </style>
 </head>
 <body>
 <div class="app">
-  <header><h1>Handbell Player Base</h1></header>
-  <div>
-    <label>曲の選択：
-      <select id="song">
-        <option value="music/song1.musicxml">Song1</option>
-        <option value="music/song2.musicxml">Song2</option>
-        <option value="music/song3.musicxml">Song3</option>
-      </select>
-    </label>
-    <button id="load">読み込む</button>
-    <button id="play">再生</button>
-    <button id="stop">停止</button>
+<header><h1>Handbell MusicXML Player</h1></header>
+<div class="row">
+  <div class="left panel">
+    <div>
+      <label>曲の選択</label>
+      <select id="songSelect"></select>
+      <button id="reloadBtn" style="margin-top:8px;">再読み込み</button>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>演奏するパート（最大3）</label>
+      <div id="parts" class="partList"></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>演奏する音程（フィルタ）</label>
+      <div id="pitches" class="pitchList"></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>テンポ（倍率 %）</label>
+      <input type="range" id="tempoPercent" min="20" max="300" value="100">
+      <div class="small">現在: <span id="tempoLabel">100%</span></div>
+    </div>
+
+    <div style="margin-top:12px">
+      <label>音量 (dB)</label>
+      <input type="range" id="volume" min="-24" max="6" value="-6">
+    </div>
+
+    <div class="controls" style="margin-top:12px">
+      <button id="playBtn">再生</button>
+      <button id="pauseBtn">一時停止</button>
+      <button id="stopBtn">停止</button>
+    </div>
+
+    <div class="progress"><div class="bar" id="progressBar"></div></div>
+    <div style="display:flex; justify-content:space-between; margin-top:6px;">
+      <div class="small"><span id="timeLabel">0:00</span></div>
+      <div class="small"><span id="durationLabel">0:00</span></div>
+    </div>
+
+    <div style="margin-top:10px">
+      <div class="small">ログ / デバッグ：</div>
+      <pre id="log"></pre>
+    </div>
   </div>
-  <div id="score">
-    <div id="cursor"></div>
+
+  <div style="flex:1">
+    <div class="panel scoreContainer">
+      <div id="osmdCanvas"></div>
+      <div class="cursorLine" id="cursorLine"></div>
+    </div>
   </div>
 </div>
+</div>
+
 <script src="https://unpkg.com/opensheetmusicdisplay/build/opensheetmusicdisplay.min.js"></script>
 <script src="https://unpkg.com/tone/build/Tone.js"></script>
+
 <script>
-const osmd = new opensheetmusicdisplay.OpenSheetMusicDisplay("score",{drawingParameters:"compact"});
-let events=[]; let total=0;
-const synth = new Tone.FMSynth({
-  harmonicity:8,modulationIndex:20,oscillator:{type:'sine'},
-  envelope:{attack:0.001,decay:1.5,sustain:0,release:1.8},
-  modulation:{type:'sine'},
-  modulationEnvelope:{attack:0.001,decay:0.6,sustain:0,release:0.6}
-}).toDestination();
-
-document.getElementById("load").onclick=async()=>{
-  const url=document.getElementById("song").value;
-  const xml=await fetch(url).then(r=>r.text());
-  await osmd.load(xml);
-  await osmd.render();
-  //簡易的に全音符スケジュールを作る
-  events=parseXML(xml);
-  total=events.reduce((m,e)=>Math.max(m,e.time+e.duration),0);
+const builtIn = {
+  "Song 1":"music/song1.musicxml",
+  "Song 2":"music/song2.musicxml",
+  "Song 3":"music/song3.musicxml"
 };
 
-document.getElementById("play").onclick=()=>{
-  if(events.length===0) return;
-  Tone.Transport.cancel(); //前回クリア
-  events.forEach(e=>{
-    Tone.Transport.schedule(time=>{
-      synth.triggerAttackRelease(Tone.Frequency(e.midi,"midi"),e.duration,time);
-    },e.time);
+const songSelect = document.getElementById('songSelect');
+const reloadBtn = document.getElementById('reloadBtn');
+const partsContainer = document.getElementById('parts');
+const pitchesContainer = document.getElementById('pitches');
+const tempoPercent = document.getElementById('tempoPercent');
+const tempoLabel = document.getElementById('tempoLabel');
+const volumeSlider = document.getElementById('volume');
+const playBtn = document.getElementById('playBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const stopBtn = document.getElementById('stopBtn');
+const progressBar = document.getElementById('progressBar');
+const timeLabel = document.getElementById('timeLabel');
+const durationLabel = document.getElementById('durationLabel');
+const cursorLine = document.getElementById('cursorLine');
+const osmdCanvas = document.getElementById('osmdCanvas');
+const logEl = document.getElementById('log');
+
+let osmd = null;
+let synth = null;
+let volumeNode = null;
+let parsedEvents = [];
+let totalDuration = 0;
+let partNames = [];
+let pitchNames = [];
+let toneParts = [];
+
+(function init(){
+  for(const k of Object.keys(builtIn)){
+    const opt = document.createElement('option'); opt.value=k; opt.textContent=k; songSelect.appendChild(opt);
+  }
+  songSelect.value=Object.keys(builtIn)[0];
+
+  songSelect.addEventListener('change', ()=> loadSong(songSelect.value));
+  reloadBtn.addEventListener('click', ()=> loadSong(songSelect.value));
+  tempoPercent.addEventListener('input', ()=>{
+    tempoLabel.textContent = tempoPercent.value + '%';
+    if(Tone.Transport.state==='started') rescheduleFrom(Tone.Transport.seconds);
   });
-  Tone.Transport.start();
-};
+  volumeSlider.addEventListener('input', ()=> { if(volumeNode) volumeNode.volume.value=parseInt(volumeSlider.value); });
 
-document.getElementById("stop").onclick=()=>{
-  Tone.Transport.stop();
-};
+  playBtn.addEventListener('click', playMusic);
+  pauseBtn.addEventListener('click', pauseMusic);
+  stopBtn.addEventListener('click', stopMusic);
 
-function parseXML(xmlText){
+  synth=new Tone.FMSynth({
+    harmonicity:8, modulationIndex:20, oscillator:{type:'sine'},
+    envelope:{attack:0.001, decay:1.5, sustain:0, release:1.8},
+    modulation:{type:'sine'},
+    modulationEnvelope:{attack:0.001, decay:0.6, sustain:0, release:0.6}
+  });
+  volumeNode = new Tone.Volume(parseInt(volumeSlider.value)).toDestination();
+  synth.connect(volumeNode);
+
+  loadSong(songSelect.value);
+})();
+
+function log(msg){
+  const t=new Date().toLocaleTimeString();
+  logEl.textContent += `[${t}] ${msg}\n`; logEl.scrollTop=logEl.scrollHeight;
+}
+
+async function loadSong(name){
+  const url = builtIn[name];
+  log(`曲読み込み: ${name} -> ${url}`);
+  let xmlText;
+  try{
+    const r = await fetch(url);
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    xmlText = await r.text();
+  }catch(e){
+    log(`ファイル読み込みエラー: ${e.message}`);
+    alert(`曲ファイル ${url} を読み込めません`);
+    return;
+  }
+
+  if(!osmd){
+    osmd=new opensheetmusicdisplay.OpenSheetMusicDisplay(osmdCanvas,{
+      drawingParameters:'compact', autoResize:true, pageFormat:{width:2000,height:200},
+      singleHorizontalStaffline:true
+    });
+  }
+
+  try{
+    await osmd.load(xmlText);
+    osmd.render();
+    log('OSMD: 描画完了');
+  }catch(e){ alert('OSMD描画失敗:'+e.message); return; }
+
+  const parsed=parseMusicXML(xmlText);
+  parsedEvents=parsed.events; totalDuration=parsed.duration;
+  partNames=parsed.parts.slice(0,3);
+  pitchNames=Array.from(new Set(parsedEvents.map(e=>e.pitchName))).sort();
+
+  renderPartUI();
+  renderPitchUI();
+  durationLabel.textContent=formatTime(totalDuration);
+
+  cursorLine.style.height=osmdCanvas.clientHeight+'px';
+  cursorLine.style.display='none';
+  progressBar.style.width='0%';
+  log(`解析完了: events=${parsedEvents.length}, duration=${totalDuration.toFixed(2)}s`);
+}
+
+function parseMusicXML(xmlText){
   const parser=new DOMParser();
-  const xml=parser.parseFromString(xmlText,"application/xml");
-  const partNodes=Array.from(xml.querySelectorAll("part"));
-  let ev=[];
-  partNodes.forEach((p,pi)=>{
-    let divisions=1,tempo=120,timeSec=0;
-    const measures=Array.from(p.querySelectorAll("measure"));
-    measures.forEach(m=>{
-      const attr=m.querySelector("attributes");
-      if(attr){const d=attr.querySelector("divisions");if(d)divisions=parseFloat(d.textContent);}
-      const sound=m.querySelector("direction>sound,sound");
-      if(sound && sound.getAttribute("tempo")) tempo=parseFloat(sound.getAttribute("tempo"));
-      const notes=Array.from(m.querySelectorAll("note"));
-      notes.forEach(n=>{
-        if(n.querySelector("rest")){
-          const dur=parseFloat(n.querySelector("duration")?.textContent||0);
-          timeSec+=dur/divisions*(60/tempo);
-          return;
-        }
-        const step=n.querySelector("pitch>step")?.textContent;
-        const octave=n.querySelector("pitch>octave")?.textContent;
-        const alter=n.querySelector("pitch>alter")?.textContent||0;
-        const dur=parseFloat(n.querySelector("duration")?.textContent||0);
-        const midi=pitchToMidi(step,parseInt(octave),parseInt(alter));
-        const secs=dur/divisions*(60/tempo);
-        ev.push({time:timeSec,duration:secs,midi});
+  const xml=parser.parseFromString(xmlText,'application/xml');
+  const partNodes=Array.from(xml.querySelectorAll('part'));
+  const partList=Array.from(xml.querySelectorAll('score-part')).map(p=>p.querySelector('part-name')?.textContent.trim()||p.getAttribute('id')||'Part');
+  let events=[];
+  partNodes.forEach((partNode,partIndex)=>{
+    let divisions=1, currentTempo=120, timeSec=0;
+    Array.from(partNode.querySelectorAll('measure')).forEach(measure=>{
+      const attr=measure.querySelector('attributes');
+      if(attr){ const d=attr.querySelector('divisions'); if(d) divisions=parseFloat(d.textContent||divisions); }
+      const sound=measure.querySelector('direction>sound, sound');
+      if(sound&&sound.getAttribute('tempo')){ const t=parseFloat(sound.getAttribute('tempo')); if(t>0) currentTempo=t; }
+      Array.from(measure.querySelectorAll('note')).forEach(note=>{
+        if(note.querySelector('rest')){ const dur=parseFloat(note.querySelector('duration')?.textContent||'0'); if(!isNaN(dur)) timeSec+=(dur/divisions)*(60/currentTempo); return; }
+        const step=note.querySelector('pitch>step')?.textContent||'C';
+        const octave=parseInt(note.querySelector('pitch>octave')?.textContent||'4');
+        const alter=parseInt(note.querySelector('pitch>alter')?.textContent||'0');
+        const dur=parseFloat(note.querySelector('duration')?.textContent||'1');
+        const midi=(octave+1)*12+({'C':0,'D':2,'E':4,'F':5,'G':7,'A':9,'B':11}[step.toUpperCase()]||0)+alter;
+        const secs=(dur/divisions)*(60/currentTempo);
+        events.push({time:timeSec,duration:secs,midi,pitchName:step+octave,partIndex});
         timeSec+=secs;
       });
     });
   });
-  return ev;
+  const duration=events.reduce((m,e)=>Math.max(m,e.time+e.duration),0);
+  return {events,parts:partList,duration};
 }
-function pitchToMidi(step,oct,alter){
-  const map={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
-  return (oct+1)*12+(map[step.toUpperCase()]||0)+alter;
+
+function renderPartUI(){
+  partsContainer.innerHTML='';
+  partNames.forEach((pn,i)=>{
+    const label=document.createElement('label');
+    label.innerHTML=`<input type="checkbox" checked data-index="${i}"> ${pn}`;
+    partsContainer.appendChild(label);
+    label.querySelector('input').addEventListener('change',updateFilters);
+  });
 }
+
+function renderPitchUI(){
+  pitchesContainer.innerHTML='';
+  pitchNames.forEach(p=>{
+    const label=document.createElement('label');
+    label.innerHTML=`<input type="checkbox" checked data-pitch="${p}"> ${p}`;
+    pitchesContainer.appendChild(label);
+    label.querySelector('input').addEventListener('change',updateFilters);
+  });
+}
+
+function updateFilters(){
+  const selectedParts=Array.from(partsContainer.querySelectorAll('input')).map(i=>i.checked?parseInt(i.dataset.index):null).filter(x=>x!==null);
+  const selectedPitches=Array.from(pitchesContainer.querySelectorAll('input')).map(i=>i.checked?i.dataset.pitch:null).filter(Boolean);
+
+  try{ osmd.setOptions({drawOnlyParts:selectedParts.length?selectedParts:[]}); osmd.render(); log(`OSMD: 再描画`);}catch(e){}
+
+  const currentlyPlaying=Tone.Transport.state==='started';
+  const sec=Tone.Transport.seconds;
+  for(const p of toneParts) try{ p.dispose(); }catch(_){}
+  toneParts=[];
+  scheduleToneParts();
+  if(currentlyPlaying) Tone.Transport.start(undefined,sec); else Tone.Transport.stop(); updateCursorOnce();
+}
+
+function scheduleToneParts(){
+  Tone.Transport.cancel();
+  toneParts=[];
+  const selectedParts=Array.from(partsContainer.querySelectorAll('input')).map(i=>i.checked?parseInt(i.dataset.index):null).filter(x=>x!==null);
+  const selectedPitches=Array.from(pitchesContainer.querySelectorAll('input')).map(i=>i.checked?i.dataset.pitch:null).filter(Boolean);
+  if(selectedParts.length===0||selectedPitches.length===0){ log('再生対象なし'); return; }
+  const tempoScale=parseInt(tempoPercent.value)/100;
+  for(const partIndex of selectedParts){
+    const partEvents=parsedEvents.filter(e=>e.partIndex===partIndex&&selectedPitches.includes(e.pitchName)).map(e=>({time:e.time/tempoScale,duration:e.duration/tempoScale,midi:e.midi}));
+    if(!partEvents.length) continue;
+    const p=new Tone.Part((time,val)=>{ synth.triggerAttackRelease(Tone.Frequency(val.midi,'midi'),val.duration,time); },partEvents);
+    p.start(0);
+    toneParts.push(p);
+  }
+  Tone.Transport.scheduleRepeat(updateCursorOnce,0.03);
+  durationLabel.textContent=formatTime(totalDuration/tempoScale);
+}
+
+async function playMusic(){ await Tone.start(); if(!toneParts.length) scheduleToneParts(); if(Tone.Transport.state!=='started') Tone.Transport.start(); cursorLine.style.display='block'; log('再生開始'); }
+function pauseMusic(){ if(Tone.Transport.state==='started'){ Tone.Transport.pause(); log('一時停止'); } }
+function stopMusic(){ if(Tone.Transport.state==='started'||Tone.Transport.state==='paused') Tone.Transport.stop(); for(const p of toneParts) try{p.dispose();}catch(_){ } toneParts=[]; Tone.Transport.cancel(); progressBar.style.width='0%'; timeLabel.textContent='0:00'; cursorLine.style.display='none'; log('停止'); }
+
+function updateCursorOnce(){
+  const tempoScale=parseInt(tempoPercent.value)/100;
+  const effectiveTotal=totalDuration/tempoScale;
+  const sec=Tone.Transport.seconds;
+  const pct=effectiveTotal>0?Math.min(1,sec/effectiveTotal):0;
+  progressBar.style.width=(pct*100)+'%';
+  timeLabel.textContent=formatTime(sec);
+  const width=osmdCanvas.scrollWidth||osmdCanvas.clientWidth||1;
+  const left=pct*width;
+  cursorLine.style.left=left+'px';
+  cursorLine.style.display='block';
+  osmdCanvas.scrollLeft=Math.max(0,left-osmdCanvas.clientWidth/2);
+  if(pct>=1) stopMusic();
+}
+
+function rescheduleFrom(sec){ try{ Tone.Transport.pause(); }catch(_){ } for(const p of toneParts) try{p.dispose();}catch(_){ } toneParts=[]; scheduleToneParts(); Tone.Transport.start(undefined,sec); log('再スケジュール:'+sec.toFixed(2)+'s'); }
+
+osmdCanvas.addEventListener('click',(ev)=>{
+  const rect=osmdCanvas.getBoundingClientRect();
+  const x=ev.clientX-rect.left+osmdCanvas.scrollLeft;
+  const width=osmdCanvas.scrollWidth||osmdCanvas.clientWidth||1;
+  const pct=x/width; const tempoScale=parseInt(tempoPercent.value)/100;
+  const targetSec=Math.max(0,Math.min(totalDuration/tempoScale,pct*totalDuration/tempoScale));
+  if(Tone.Transport.state==='started'||Tone.Transport.state==='paused') stopMusic();
+  scheduleToneParts();
+  Tone.Transport.start(undefined,targetSec);
+  log(`クリック再生:${targetSec.toFixed(2)}s`);
+});
+
+function formatTime(s){ if(!isFinite(s)||s<=0) return '0:00'; const m=Math.floor(s/60); const sec=Math.floor(s%60); return `${m}:${sec<10?'0':''}${sec}`; }
 </script>
 </body>
 </html>
