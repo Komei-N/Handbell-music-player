@@ -2,34 +2,57 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>ハンドベル練習アプリ（シンセ版）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ハンドベル練習アプリ</title>
 <style>
-  body { font-family: sans-serif; text-align: center; margin: 0; padding: 0; }
-  #controls { margin: 20px; }
-  #sheetContainer { width: 90%; height: 500px; margin: auto; border: 1px solid #ccc; overflow: hidden; position: relative; }
-  #highlightBar { position: absolute; width: 3px; background: red; pointer-events: none; }
+  body { font-family: sans-serif; margin:0; padding:0; background:#f8f8f8; }
+  h1 { text-align:center; margin:1rem 0; }
+  #controls { display:flex; flex-wrap:wrap; justify-content:center; gap:1rem; padding:1rem; background:#fff; box-shadow:0 2px 5px rgba(0,0,0,0.1);}
+  #controls > div { display:flex; flex-direction: column; }
+  label { margin:0.3rem 0; font-size:0.9rem; }
+  select, input[type=number] { padding:0.3rem; border-radius:5px; border:1px solid #ccc; }
+  button { padding:0.4rem 0.8rem; border:none; border-radius:5px; background:#007bff; color:#fff; font-weight:bold; cursor:pointer; transition:0.2s; }
+  button:hover { background:#0056b3; }
+  #filters { display:flex; flex-wrap: wrap; gap:1rem; margin:0.5rem 1rem; }
+  .filter-group { background:#f0f0f0; padding:0.5rem; border-radius:5px; max-height:200px; overflow:auto; }
+  .filter-group label { display:block; font-size:0.8rem; }
+  #sheetContainer { width: 95%; height: 60vh; margin: 1rem auto; border:1px solid #ccc; position:relative; overflow:auto; background:#fff; }
+  #highlightBar { position:absolute; width:3px; background:red; pointer-events:none; }
+  @media(max-width:600px){ #controls { flex-direction: column; align-items:center; } }
 </style>
 </head>
 <body>
 
-<h1>ハンドベル練習アプリ（シンセ版）</h1>
+<h1>ハンドベル練習アプリ</h1>
 
 <div id="controls">
-  <label>曲を選択:
+  <div>
+    <label>曲選択</label>
     <select id="songSelect">
       <option value="bultava.xml">ブルタバ</option>
       <option value="koina.xml">小さな恋のうた</option>
       <option value="mrsgreen.xml">ミセスグリーンアップルメドレー</option>
     </select>
-  </label>
-  <button id="loadBtn">読み込み</button>
-  <br><br>
-  <label>テンポ (%): <input type="number" id="tempoInput" value="100" min="20" max="300">%</label>
-  <button id="playBtn">再生</button>
-  <button id="stopBtn">停止</button>
-  <br><br>
-  <label>パート選択: <input type="text" id="partSelect" placeholder="例: 1,2,3"></label>
-  <label>音程選択: <input type="text" id="noteSelect" placeholder="例: C3,D4"></label>
+    <button id="loadBtn">読み込み</button>
+  </div>
+  <div>
+    <label>テンポ (%)</label>
+    <input type="number" id="tempoInput" value="100" min="20" max="300">
+  </div>
+  <div>
+    <label>操作</label>
+    <button id="playBtn">再生</button>
+    <button id="stopBtn">停止</button>
+  </div>
+</div>
+
+<div id="filters">
+  <div class="filter-group" id="partFilterGroup">
+    <label>パート選択</label>
+  </div>
+  <div class="filter-group" id="noteFilterGroup">
+    <label>音程選択</label>
+  </div>
 </div>
 
 <div id="sheetContainer">
@@ -39,48 +62,69 @@
 <script src="https://cdn.jsdelivr.net/npm/opensheetmusicdisplay/build/opensheetmusicdisplay.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
 <script>
-// ------------------- 初期設定 -------------------
 let osmd, audioStarted=false;
-let notesTimeline = [];
-let highlightBar = document.getElementById('highlightBar');
-let playTimeouts = [];
+let notesTimeline=[], playTimeouts=[], currentPlayIndex=0;
+let highlightBar=document.getElementById('highlightBar');
+const container=document.getElementById('sheetContainer');
 
-// ハンドベル風シンセサイザー
-const bellSynth = new Tone.PolySynth(Tone.Synth, {
-  oscillator: { type: "triangle" },
-  envelope: { attack:0.01, decay:1.2, sustain:0.1, release:1.5 }
+const bellSynth=new Tone.PolySynth(Tone.Synth,{
+  oscillator:{ type:"triangle" },
+  envelope:{ attack:0.01, decay:1.2, sustain:0.1, release:1.5 }
 }).toDestination();
 
-// ------------------- 曲読み込み -------------------
-document.getElementById('loadBtn').addEventListener('click', async () => {
-  const song = document.getElementById('songSelect').value;
-  osmd = new opensheetmusicdisplay.OSMD(document.getElementById("sheetContainer"), {autoResize:true});
+// ---------------- 曲読み込み ----------------
+document.getElementById('loadBtn').addEventListener('click', async()=>{
+  const song=document.getElementById('songSelect').value;
+  osmd=new opensheetmusicdisplay.OSMD(container,{autoResize:true});
   await osmd.load(song);
   osmd.render();
+  generateFilters();
   prepareNotesTimeline();
+  attachNoteClickHandlers();
 });
 
-// ------------------- タイムライン作成 -------------------
-function prepareNotesTimeline() {
-  notesTimeline = [];
-  const tempoPercent = document.getElementById('tempoInput').value / 100;
-  const partFilter = document.getElementById('partSelect').value.split(',').map(x => x.trim());
-  const noteFilter = document.getElementById('noteSelect').value.split(',').map(x => x.trim().toUpperCase());
+// ---------------- フィルター生成 ----------------
+function generateFilters(){
+  const partContainer=document.getElementById('partFilterGroup');
+  const noteContainer=document.getElementById('noteFilterGroup');
+  partContainer.innerHTML='<label>パート選択</label>';
+  noteContainer.innerHTML='<label>音程選択</label>';
 
-  let currentTime = 0;
-  const layout = osmd.GraphicSheet;
+  let partsCount=osmd.Sheet.Staves.length;
+  for(let i=1;i<=partsCount;i++){
+    const label=document.createElement('label');
+    label.innerHTML=`<input type="checkbox" class="partCheckbox" value="${i}" checked> ${i}`;
+    partContainer.appendChild(label);
+  }
 
-  layout.MeasureList.forEach(measure => {
-    measure.Staves.forEach(staff => {
-      staff.Voices.forEach(voice => {
-        voice.Notes.forEach(note => {
-          const pitch = note.Pitch ? note.Pitch.Name + note.Pitch.Octave : null;
-          const partIndex = staff.ParentMeasure.ParentSourceStaffEntry.StaffIndex + 1;
-          if((partFilter[0]=="" || partFilter.includes(partIndex.toString())) &&
-             (noteFilter[0]=="" || noteFilter.includes(pitch))) {
-            const durationSec = (note.Duration.RealValue / osmd.EngravingRules.Ticks) * (60 / osmd.Sheet.MajorUnit * 4) / tempoPercent;
-            notesTimeline.push({note, start: currentTime, duration: durationSec});
-            currentTime += durationSec;
+  // 音程（シャープ・フラット対応）
+  const notes=['C3','C#3','Db3','D3','D#3','Eb3','E3','F3','F#3','Gb3','G3','G#3','Ab3','A3','A#3','Bb3','B3','C4','C#4','Db4','D4'];
+  notes.forEach(n=>{
+    const label=document.createElement('label');
+    label.innerHTML=`<input type="checkbox" class="noteCheckbox" value="${n}" checked> ${n}`;
+    noteContainer.appendChild(label);
+  });
+}
+
+// ---------------- タイムライン作成 ----------------
+function prepareNotesTimeline(){
+  notesTimeline=[];
+  const tempoPercent=document.getElementById('tempoInput').value/100;
+  const partFilter=[...document.querySelectorAll('.partCheckbox:checked')].map(c=>c.value);
+  const noteFilter=[...document.querySelectorAll('.noteCheckbox:checked')].map(c=>c.value);
+
+  let currentTime=0;
+  osmd.GraphicSheet.MeasureList.forEach(measure=>{
+    measure.Staves.forEach(staff=>{
+      staff.Voices.forEach(voice=>{
+        voice.Notes.forEach(note=>{
+          const pitch=note.Pitch?note.Pitch.Name+note.Pitch.Octave:null;
+          const partIndex=staff.ParentMeasure.ParentSourceStaffEntry.StaffIndex+1;
+          if((partFilter.length==0||partFilter.includes(partIndex.toString())) &&
+             (noteFilter.length==0||noteFilter.includes(pitch))){
+            const durationSec=(note.Duration.RealValue/osmd.EngravingRules.Ticks)*(60/osmd.Sheet.MajorUnit*4)/tempoPercent;
+            notesTimeline.push({note,start:currentTime,duration:durationSec});
+            currentTime+=durationSec;
           }
         });
       });
@@ -88,47 +132,79 @@ function prepareNotesTimeline() {
   });
 }
 
-// ------------------- 再生 -------------------
-document.getElementById('playBtn').addEventListener('click', async () => {
-  if(!audioStarted){
-    await Tone.start();
-    audioStarted=true;
-  }
-  stopPlayback(); // 前回の再生停止
-  notesTimeline.forEach((n,i)=>{
-    playTimeouts.push(setTimeout(()=>{
-      playNote(n);
-    }, n.start*1000));
-  });
+// ---------------- 再生 ----------------
+document.getElementById('playBtn').addEventListener('click',async()=>{
+  if(!audioStarted){ await Tone.start(); audioStarted=true; }
+  stopPlayback();
+  currentPlayIndex=0;
+  playFromIndex(currentPlayIndex);
 });
 
-// ------------------- 停止 -------------------
-document.getElementById('stopBtn').addEventListener('click', stopPlayback);
+// ---------------- 停止 ----------------
+document.getElementById('stopBtn').addEventListener('click',stopPlayback);
+function stopPlayback(){ playTimeouts.forEach(t=>clearTimeout(t)); playTimeouts=[]; }
 
-function stopPlayback() {
-  playTimeouts.forEach(t=>clearTimeout(t));
-  playTimeouts=[];
+// ---------------- 再生関数 ----------------
+function playFromIndex(startIndex){
+  for(let i=startIndex;i<notesTimeline.length;i++){
+    const n=notesTimeline[i];
+    const timeout=setTimeout(()=>{ playNote(n); currentPlayIndex=i; }, n.start*1000 - notesTimeline[startIndex].start*1000);
+    playTimeouts.push(timeout);
+  }
 }
 
-// ------------------- 音符再生 & ハイライト -------------------
-function playNote(n) {
-  const pitch = n.note.Pitch ? n.note.Pitch.Name + n.note.Pitch.Octave : null;
-  if(pitch) bellSynth.triggerAttackRelease(pitch, n.duration);
+// ---------------- 音符再生 + ハイライト ----------------
+function playNote(n){
+  const pitch=n.note.Pitch?n.note.Pitch.Name+n.note.Pitch.Octave:null;
+  if(pitch) bellSynth.triggerAttackRelease(pitch,n.duration);
   highlightNote(n.note);
 }
 
-// ------------------- 赤バー表示（段跨ぎ対応） -------------------
-function highlightNote(note) {
+// ---------------- 赤バー表示 + 滑らかスクロール ----------------
+function highlightNote(note){
   if(!note) return;
-  const bbox = note.getBoundingBox();
-  highlightBar.style.top = bbox.y + "px";
-  highlightBar.style.left = bbox.x + "px";
-  highlightBar.style.height = bbox.height + "px";
-  highlightBar.style.display = "block";
-  const container = document.getElementById("sheetContainer");
-  // 横スクロール調整（段を跨ぐ場合も対応）
-  const leftPos = bbox.x - container.clientWidth/2 + bbox.width/2;
-  container.scrollLeft = leftPos;
+  const bbox=note.getBoundingBox();
+  highlightBar.style.top=bbox.y+'px';
+  highlightBar.style.left=bbox.x+'px';
+  highlightBar.style.height=bbox.height+'px';
+  highlightBar.style.display='block';
+
+  // 滑らかスクロールで中央に
+  const target=bbox.x - container.clientWidth/2 + bbox.width/2;
+  smoothScroll(container, target, 200);
+}
+
+// ---------------- 滑らかスクロール ----------------
+function smoothScroll(element, target, duration){
+  const start=element.scrollLeft;
+  const change=target-start;
+  const startTime=performance.now();
+
+  function animate(time){
+    const elapsed=time-startTime;
+    const fraction=Math.min(elapsed/duration,1);
+    element.scrollLeft=start+change*fraction;
+    if(fraction<1) requestAnimationFrame(animate);
+  }
+  requestAnimationFrame(animate);
+}
+
+// ---------------- 音符クリックで再生 ----------------
+function attachNoteClickHandlers(){
+  osmd.GraphicSheet.MeasureList.forEach(measure=>{
+    measure.Staves.forEach(staff=>{
+      staff.Voices.forEach(voice=>{
+        voice.Notes.forEach((note,index)=>{
+          note.clickable=true;
+          note.graphic.getSVGElement().addEventListener('click',()=>{
+            stopPlayback();
+            currentPlayIndex=notesTimeline.findIndex(n=>n.note===note);
+            if(currentPlayIndex>=0) playFromIndex(currentPlayIndex);
+          });
+        });
+      });
+    });
+  });
 }
 </script>
 
